@@ -1,0 +1,97 @@
+""""""
+import os
+import numpy as np
+import nibabel as nib
+import utils
+from scipy.ndimage import gaussian_filter
+
+
+def sum_volumes(volume_list, zscore=True, gauss_sd=0):
+    for i, ligand in enumerate(volume_list):
+        rec_vol = nib.load(ligand).get_fdata()
+        if zscore:
+            rec_vol = (rec_vol - rec_vol.mean()) / rec_vol.std()
+
+        if i == 0:
+            vol = rec_vol 
+        else:
+            vol += rec_vol
+
+    if gauss_sd > 0:
+        vol = gaussian_filter(vol,gauss_sd)
+
+    return vol
+
+
+
+def create_volume(receptor_files, target_strings, output_filename):
+
+    if not os.path.exists(output_filename):
+        file_list = utils.get_files_from_list( receptor_files, target_strings) 
+        
+        ref_img = nib.load(file_list[0])
+
+        summed_vol = sum_volumes(file_list )
+
+        nib.Nifti1Image(summed_vol, ref_img.affine, ref_img.header).to_filename(output_filename)
+    else :
+        summed_vol = nib.load(output_filename).get_fdata()
+
+    return summed_vol
+
+def calc_ratio(vol0,vol1,mask):
+    out = np.zeros_like(vol0)
+    idx = (mask > 0) & (vol0 > 0) & (vol1 > 0)
+    out[idx] = vol0[idx] / vol1[idx]
+    out = np.clip(out, 0, 10)
+    print(f'Max ratio: {out.max()}, Min ratio: {out.min()}')
+    return out
+
+
+def ratio_analysis(receptor_files, mask_file, output_dir):
+    """Calculate ratios of receptor volumes"""
+    os.makedirs(output_dir, exist_ok=True)
+
+    mask_vol = nib.load(mask_file).get_fdata()
+
+    affine = nib.load(receptor_files[0]).affine
+
+    exh_filename = f'{output_dir}/macaque_exh.nii.gz'
+
+    inh_filename = f'{output_dir}/macaque_inh.nii.gz'
+
+    mod_filename = f'{output_dir}/macaque_mod.nii.gz'
+
+    inh_vol = create_volume(receptor_files, ['musc', 'cgp5', 'flum'], inh_filename)
+    exh_vol = create_volume(receptor_files, ['ampa', 'kain', 'mk80'], exh_filename)
+    mod_vol = create_volume(receptor_files, ['dpat', 'uk14', 'oxot', 'keta', 'sch2', 'pire'], mod_filename)
+
+    exh_inh_filename = f'{output_dir}/macaque_ratio_ex_inh.nii.gz'
+    gabaa_gabab_filename = f'{output_dir}/macaque_ratio_gabaa_gabab.nii.gz'
+    ampakain_mk80_filename = f'{output_dir}/macaque_ratio_ampakain_mk80.nii.gz'
+    inhexh_mod_filename = f'{output_dir}/macaque_ratio_inhexh_mod.nii.gz'
+
+    print('Exhibitory / Inhibitory')
+    exh_inh_vol = calc_ratio(exh_vol, inh_vol, mask_vol)
+    nib.Nifti1Image(exh_inh_vol, affine).to_filename(exh_inh_filename)
+
+    flum_vol = utils.get_volume_from_list(receptor_files, 'flum', zscore=False)
+    cgp5_vol = utils.get_volume_from_list(receptor_files, 'cgp5', zscore=False)
+    musc_vol = utils.get_volume_from_list(receptor_files, 'musc', zscore=False)
+    ampa_vol = utils.get_volume_from_list(receptor_files, 'ampa', zscore=False)
+    kain_vol = utils.get_volume_from_list(receptor_files, 'kain', zscore=False)
+    mk80_vol = utils.get_volume_from_list(receptor_files, 'mk80', zscore=False)
+
+
+    gabaa_gabab = calc_ratio((musc_vol+flum_vol)/2, cgp5_vol, mask_vol )
+    nib.Nifti1Image(gabaa_gabab, affine).to_filename(gabaa_gabab_filename)
+   
+    ampakain_mk80 = calc_ratio( (ampa_vol + kain_vol)/2, mk80_vol, mask_vol) 
+    nib.Nifti1Image(ampakain_mk80, affine).to_filename(ampakain_mk80_filename)
+
+    print('Inhibitory + Exhibitory / Modulatory')
+    inhexh_mod_vol = calc_ratio( (inh_vol + exh_vol), mod_vol, mask_vol)
+    nib.Nifti1Image(inhexh_mod_vol, affine).to_filename(inhexh_mod_filename)
+
+    output_volumes = [exh_inh_filename,  inhexh_mod_filename ]
+    cmap_label_list = ['Ex./Inh.',  '(Inh.+Ex.)/Mod.'] #'GABAa/GABAb', '(AMPA+Kainate)/NMDA',gabaa_gabab_filename, ampakain_mk80_filename,
