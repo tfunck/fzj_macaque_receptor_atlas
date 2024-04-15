@@ -32,14 +32,14 @@ def get_voxel_receptor_values(receptor_volumes, vxl, output_dir):
     """Get receptor values for each voxel."""
     nvox = len(vxl[0])
 
-    receptor_features = np.zeros((nvox, len(receptor_volumes)))
+    receptor_features = np.zeros((nvox, len(receptor_volumes)),dtype=np.float16)
 
     for i, receptor in enumerate(receptor_volumes):
         receptor_vol = nib.load(receptor)
         receptor_data = receptor_vol.get_fdata()
 
         #z score receptor data
-        receptor_data = (receptor_data - receptor_data.mean()) / receptor_data.std()
+        receptor_data = ((receptor_data - receptor_data.mean()) / receptor_data.std()).astype(np.float16)
 
         receptor_features[:, i] = receptor_data[vxl]
 
@@ -84,21 +84,25 @@ def volumetric_gradient_analysis(mask_file, receptor_volumes, output_dir, n=2000
     vxl = get_random_voxels(mask_file, n=n)
 
     # Return a 2D array of n_voxels x n_receptors
-    receptor_features = get_voxel_receptor_values(receptor_volumes, vxl, output_dir)
+    receptor_features = get_voxel_receptor_values(receptor_volumes, vxl, output_dir).astype(np.float16)
 
     # Calculate voxel-wise correlation between receptor features
     #corr = spearmanr(receptor_features.T)[0]
-    corr = np.corrcoef(receptor_features)
-    plt.imshow(corr,cmap='nipy_spectral')
-    plt.savefig(f'{output_dir}/correlation_matrix.png')
+    corr = np.corrcoef(receptor_features).astype(np.float16)
+    n_componenets = receptor_features.shape[1]
+    del receptor_features
+
+    print('Correlation matrix shape', corr.shape)
+    #plt.imshow(corr,cmap='nipy_spectral')
+    #plt.savefig(f'{output_dir}/correlation_matrix.png')
 
     # Calculate receptor gradients
     gm = GradientMaps(kernel=None,
-                      n_components=receptor_features.shape[1], 
+                      n_components=n_componenets, 
                       approach='pca')
 
     gm.fit(corr)
-
+    del corr
     plot_explained_variance(gm, output_dir)
 
     create_component_volumes(gm, vxl, mask_file, output_dir)
