@@ -7,9 +7,13 @@ import numpy as np
 import ants
 import glob
 import brainbuilder.utils.mesh_utils as mesh_utils 
-
+from brainbuilder.utils.mesh_utils import mesh_to_volume
+from scipy.ndimage import gaussian_filter
+from scipy.stats import spearmanr
+from matplotlib_surface_plotting import plot_surf
 from surfaces.surface_gradient_analysis import roi_gradients, vertex_gradients
-
+from surfaces.surface_diff import surface_diff
+import utils
 
 def mebrains_to_yerkes(mebrains_filename, yerkes_filename, align_dir):
     """Align MEBRAINS to Yerkes"""
@@ -53,76 +57,62 @@ def transform_receptor_volumes(receptor_volumes, tfm, output_dir):
     return receptor_volumes_transformed
 
 
-def project_to_surface(receptor_volumes, wm_surf_filename, gm_surf_filename, output_dir, n=10):
-    """Project recosntructions to Yerkes Surface"""
-    profile_list = []
+ 
 
-    for receptor_volume in receptor_volumes:
-        profile_fn = f"{output_dir}/{os.path.basename(receptor_volume).replace('.nii.gz','')}.npy"
-        profile_list.append(profile_fn)
-
-        if not os.path.exists(profile_fn) :
-            receptor = nib.load(receptor_volume)
-            receptor = receptor.get_fdata()
-
-            #z score receptor data
-            wm_coords, _ = mesh_utils.load_mesh_ext(wm_surf_filename)
-            gm_coords, _ = mesh_utils.load_mesh_ext(gm_surf_filename)
-
-            d_vtr = gm_coords - wm_coords
-
-            profiles = np.zeros([wm_coords.shape[0], n])
-
-            for i, d in enumerate(np.linspace(0, 1, n)):
-
-                coords = gm_coords + d_vtr * d
-
-                surf_receptor_vtr = mesh_utils.volume_filename_to_mesh(coords, receptor_volume, zscore=True)
-
-                profiles[:,i] = surf_receptor_vtr
-            
-            # Save profiles
-            np.save(profile_fn, profiles)
-
-    return profile_list
-
-if __name__ == '__main__':
-    print('Surface based analysis for 3D receptors')
-    parser = argparse.ArgumentParser(description='Surface-based Gradient Analysis')
-    parser.add_argument('-m', dest='mebrains_filename', default='data/volumes/MEBRAINS_T1_masked.nii.gz', type=str, help='Path to mask file')
-    parser.add_argument('-y', dest='yerkes_filename', type=str, default='data/volumes/MacaqueYerkes19_v1.2_AverageT1w_restore_masked.nii.gz', help='Path to Yerkes volume')
-    parser.add_argument('-o', dest='output_dir', type=str, default='outputs/surf', help='Path to output directory')
-    parser.add_argument('-n', dest='n', default=10000, type=int, help='Number of random voxels to sample')
-    parser.add_argument('-i', dest='input_dir', type=str, default='data/reconstruction/receptor/', help='Path to receptor volumes')
-    parser.add_argument('--wm-surf', dest='wm_surf_filename', type=str, default='data/surfaces/MacaqueYerkes19.L.white.10k_fs_LR.surf.gii', help='Path to Yerkes white matter surface')
-    parser.add_argument('--gm-surf', dest='gm_surf_filename', type=str, default='data/surfaces/MacaqueYerkes19.L.pial.10k_fs_LR.surf.gii', help='Path to Yerkes pial matter surface')
-    parser.add_argument('--surf-atlas', dest='surf_atlas_filename', type=str, default='data/surfaces/L.Markov.monkey.10k_fs_LR.label.gii', help='Path to surface mask')
+def plot_summed_receptor_surf(
+        receptor_surfaces, 
+        gm_surf_filename, 
+        ligands, 
+        profiles_dir, 
+        label='', 
+        cmap='RdBu_r'
+        ):  
+    rec_list = utils.get_files_from_list( receptor_surfaces, ligands)
+    assert len(rec_list) > 0, f'No receptor profiles found for {ligands}'
+    plot_receptor_surf(rec_list, gm_surf_filename, profiles_dir, label=label, cmap=cmap)
+    return rec_list
 
 
-    args = parser.parse_args()
 
-    receptor_volumes = glob.glob(f'{args.input_dir}/*nii.gz')
 
-    align_dir = f"{args.output_dir}/align/"
-    profiles_dir = f"{args.output_dir}/profiles/"
-    gradient_dir = f"{args.output_dir}/gradients/"
+def surface_analysis(receptor_volumes, wm_surf_filename, gm_surf_filename, profiles_dir, output_dir):
+    """Surface based analysis for 3D receptors"""
 
-    os.makedirs(align_dir, exist_ok=True)
-    os.makedirs(profiles_dir, exist_ok=True)
-    os.makedirs(gradient_dir, exist_ok=True)
+    receptor_surfaces = project_to_surface(
+        receptor_volumes, 
+        wm_surf_filename, 
+        gm_surf_filename, 
+        profiles_dir,
+        n = 10,
+        sigma = 0,
+        zscore = False,
+        clobber = True
+        )
 
-    # Align MEBRAINS to Yerkes
-    ### FIXME currently volumetric alignment, replace with surface-based
-    tfm = mebrains_to_yerkes(args.mebrains_filename, args.yerkes_filename, align_dir)
+    profiles_dir = f"{output_dir}/profiles/"
+    diff_gradient_dir = f"{output_dir}/diff_gradients/"
 
-    # Transform 3D reconstruction to Yerkes
-    receptor_volumes = transform_receptor_volumes(receptor_volumes, tfm, align_dir)
+    os.makedirs(profiles_dir,exist_ok=True)
+    os.makedirs(diff_gradient_dir,exist_ok=True)
 
-    # Project recosntructions to Yerkes Surface
-    receptor_surfaces = project_to_surface(receptor_volumes, args.wm_surf_filename, args.gm_surf_filename, profiles_dir)
+    """
+    inh_list = plot_summed_receptor_surf(
+        receptor_surfaces, gm_surf_filename, ['flum', 'musc', 'cgp5'], profiles_dir, label='Inh'
+        )
+    
+    ex_list = plot_summed_receptor_surf(
+        receptor_surfaces, gm_surf_filename, ['ampa', 'kain', 'mk80'], profiles_dir, label='Ex'
+        )
+        
+    mod_list = plot_summed_receptor_surf(
+        receptor_surfaces, gm_surf_filename, ['dpat', 'uk14', 'oxot', 'keta', 'sch2', 'pire'], profiles_dir, label='Mod'
+        )
 
-    # Calculate ROI-based gradients
-    roi_gradients(receptor_surfaces, args.surf_atlas_filename, args.gm_surf_filename, gradient_dir)
+    """
+    surface_diff(receptor_surfaces, wm_surf_filename, wm_surf_filename, diff_gradient_dir, label='all')
+    for surface_filename in receptor_surfaces:
+        label = os.path.basename(surface_filename).replace('.npy','')
+        print('Surface Difference:', label)
+        surface_diff([surface_filename], wm_surf_filename, wm_surf_filename, diff_gradient_dir, label=label)
 
-    # Calculate vertex-based gradients
-    vertex_gradients(receptor_surfaces, args.wm_surf_filename, gradient_dir)
+ 

@@ -1,5 +1,6 @@
 import numpy as np
 import nibabel as nib
+import os
 
 from utils import plot_explained_variance
 import brainbuilder.utils.mesh_utils as mesh_utils
@@ -42,7 +43,8 @@ def plot_gradient_surface(cortical_surface, grad, output_dir, component, cmap_la
 
     filename = f'{output_dir}/{prefix}{component}.png'
 
-    pvals = np.ones_like(grad)
+    pvals = np.zeros_like(grad)
+    pvals[grad > grad.min()] = 1
 
     plot_surf( coords_l, 
                 faces_l, 
@@ -85,28 +87,46 @@ def roi_gradients(receptor_surfaces, surface_atlas, cortex_surface,  output_dir)
 
         plot_gradient_surface(cortex_surface, vtr, output_dir, i, prefix='roi_gradient_')
     
-def vertex_gradients(receptor_surfaces, cortex_surface, output_dir):
+def vertex_gradients(receptor_features, cortex_surface, output_dir, samples=10000, label=''):
+    os.makedirs(output_dir, exist_ok=True)
+    n = receptor_features.shape[0]
+    r = np.arange(n).astype(int)    
+    idx = np.random.choice(r, samples)
 
-    receptor_features = np.array([ np.mean(np.load(receptor_surface), axis=1) for receptor_surface in receptor_surfaces])
+    output_filename_list = [ 'vertex_gradient_'+label+'_' for i in range(2) ]
+    output_gradient_filename = output_dir + '/gradients.npy'
+    output_idx_filename = output_dir + '/idx.npy'
+
+    if not os.path.exists(output_gradient_filename) or not os.path.exists(output_idx_filename): 
+
+        receptor_features = receptor_features[ idx, : ]
+
+        print(receptor_features.shape)
+        corr = np.corrcoef(receptor_features)
+        print('Correlation matrix shape:', corr.shape)
+
+        gm = GradientMaps(
+                            kernel=None,
+                            n_components=receptor_features.shape[0], 
+                            approach='pca')
 
 
-    corr = spearmanr(receptor_features)[0]
+        gm.fit(corr)
 
-    gm = GradientMaps(
-                        kernel='spearman',
-                        n_components=receptor_features.shape[0], 
-                        approach='pca')
+        plot_explained_variance(gm, output_dir)
 
+        for i, output_filename in enumerate(output_filename_list) :
+            grad = np.zeros(n) 
+            grad[idx] = gm.gradients_[:, i]
+            plot_gradient_surface(cortex_surface, grad, output_dir, i, prefix=output_filename)
 
-    gm.fit(receptor_features.T)
+        np.save(output_gradient_filename, gm.gradients_)
+        np.save(output_idx_filename, idx)
 
-    plot_explained_variance(gm, output_dir)
+    gradients = np.load(output_gradient_filename)
+    idx = np.load(output_idx_filename)
 
-    for i in range(4) :
-        grad = gm.gradients_[:, i]
-        plot_gradient_surface(cortex_surface, grad, output_dir, i, prefix='vertex_gradient_')
-
-    return gm.gradients_
+    return gradients, idx
 
 
 
