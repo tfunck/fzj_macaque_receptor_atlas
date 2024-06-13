@@ -299,7 +299,8 @@ if __name__ == '__main__' :
     parser.add_argument('-l', dest='label_file', default='data/volumes/MEBRAINS_pseudo-segmentation-0_gm_left.nii.gz', type=str, help='Path to mask file')
     parser.add_argument('-e' , dest='mebrains_filename', default='data/volumes/MEBRAINS_T1_masked.nii.gz', type=str, help='Path to mask file')
     parser.add_argument('-y' , dest='yerkes_template_filename', default='data/volumes/MacaqueYerkes19_v1.2_AverageT1w_restore_masked.nii.gz', type=str, help='Path to mask file')
-    parser.add_argument('-a' , dest='yerkes_atlas_filename', default='data/surfaces/L.BezginTo7Networks.32k_fs_LR.label.gii', type=str, help='Path to mask file')
+    #parser.add_argument('-a' , dest='yerkes_atlas_filename', default='data/surfaces/L.BezginTo7Networks.32k_fs_LR.label.gii', type=str, help='Path to mask file')
+    parser.add_argument('-a' , dest='yerkes_atlas_filename', default='data/surfaces/R.Yeo2011_17Networks_N1000.human.10k_fs_LR.label.gii', type=str, help='Path to mask file')
     parser.add_argument('-i', dest='input_dir', type=str, default='data/reconstruction/', help='Path to receptor volumes')
     parser.add_argument('-o', dest='output_dir', type=str, default=f'{wrk_dir}/outputs/volumetric', help='Path to output directory')
     parser.add_argument('-n', dest='n', default=10000, type=int, help='Number of random voxels to sample')
@@ -382,22 +383,22 @@ if __name__ == '__main__' :
                                                      )
 
     apply_surface_atlas(yerkes_complexity_surfaces, args.yerkes_atlas_filename, args.output_dir, 'complexity')
-    exit(0)
 
 
     ### Calculate PCA gradients
-    gradient_volumes = volumetric_gradient_analysis(mask_rsl_file, receptor_volumes, grad_dir, approach='pca', n=args.n)
+    #gradient_volumes = volumetric_gradient_analysis(mask_rsl_file, receptor_volumes, grad_dir, approach='pca', n=args.n)
     #gradient_volumes = volumetric_gradient_analysis(mask_rsl_file, receptor_volumes, grad_dir, approach='le', n=args.n)
     gradient_volumes = volumetric_gradient_analysis(mask_rsl_file, receptor_volumes, grad_dir, approach='dm', n=args.n)
 
     ### Calculate ratios between receptor volumes
     ratio_dict = ratio_analysis(receptor_volumes, mask_rsl_file, ratio_dir )
     ratio_volumes = [fn for fn,lab in ratio_dict.items() if lab in ['Ex', 'Inh', 'Mod']]
-    vif_analysis(ratio_volumes, mask_rsl_file, corr_dir)
-    vif_analysis(gradient_volumes, mask_rsl_file, corr_dir)
+    #vif_analysis(ratio_volumes, mask_rsl_file, corr_dir)
+    #vif_analysis(gradient_volumes, mask_rsl_file, corr_dir)
     vif_analysis(receptor_volumes, mask_rsl_file, corr_dir)
     plot_pairwise_correlation(receptor_volumes, mask_rsl_file, corr_dir)
 
+    exit(0)
     
 
     # Plot entropy on surface
