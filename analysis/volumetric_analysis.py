@@ -14,6 +14,8 @@ import brainbuilder.utils.mesh_utils as mesh_utils
 from volumetric.surf_utils import project_to_surface, project_and_plot_surf, load_gifti, write_gifti
 from surfaces.surface_diff import surface_diff
 
+from nipype.interfaces.ants import ApplyTransforms
+
 from matplotlib_surface_plotting import plot_surf
 from skimage.transform import resize
 from scipy.stats import spearmanr, pearsonr
@@ -98,6 +100,7 @@ def plot_pairwise_correlation(comparison_volumes, mask_vol, output_dir):
     # 1   1
     # 2     1
     # 3       1
+    plt.cla(); plt.clf(); plt.close()
 
     for i, x_filename in enumerate(comparison_volumes[0:-1]):
         x = nib.load(x_filename).get_fdata()
@@ -117,9 +120,17 @@ def plot_pairwise_correlation(comparison_volumes, mask_vol, output_dir):
 
             r, p = spearmanr(x0, y0)
             #r, p = pearsonr(x, y)
-            print(f'{x_filename} vs {y_filename} : r={r}, p={p}')
+            xlabel=os.path.basename(x_filename).replace('.nii.gz','')
+            ylabel=os.path.basename(y_filename).replace('.nii.gz','')
+            print(f'{xlabel} vs {ylabel} : r={r}, p={p}')
             corr_matrix[i,k] = r
             corr_matrix[k,i] = r
+            plt.scatter(x0,y0, alpha=0.25)
+            plt.xlabel(xlabel)
+            plt.ylabel(ylabel)
+            plt.savefig(f'{output_dir}/{xlabel}_vs_{ylabel}.png')
+            plt.cla(); plt.clf(); plt.close()
+
 
     plt.cla(); plt.clf(); plt.close()
     plt.imshow(corr_matrix, cmap='viridis')
@@ -129,6 +140,7 @@ def plot_pairwise_correlation(comparison_volumes, mask_vol, output_dir):
     np.save(f'{output_dir}/correlation_matrix.npy', corr_matrix)
 
 def vif_analysis(comparison_volumes, mask_filenmae, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
     n=len(comparison_volumes)
 
     mask_vol= nib.load(mask_filenmae).get_fdata()
@@ -198,60 +210,107 @@ def entropy_vs_gradient(
 
 
 
-def align(fixed_filename, moving_filename, moving_mask_filename, files_to_transform, output_dir):
-    import ants
+def align(
+        fixed_filename, 
+        moving_filename, 
+        moving_mask_filename, 
+        files_to_transform, 
+        output_dir,
+        moving_prefix='MEBRAINS', 
+        fixed_prefix='Yerkes',
+        clobber=False
+        ):
+    import nipype.interfaces.ants as ants
 
     os.makedirs(output_dir, exist_ok=True)
 
-    fwd_filename = f'{output_dir}/forward_transform.h5'
-    inv_filename = f'{output_dir}/inverse_transform.h5'
-
+    prefix='{0}/{1}_{2}_'.format(output_dir, moving_prefix, fixed_prefix)
+    fwd_filename = f'{prefix}Composite.h5'
+    inv_filename = f'{prefix}InverseComposite.h5'
     output_files = [ f'{output_dir}/{os.path.basename(filename)}' for filename in files_to_transform ]
 
-    if  not os.path.exists(fwd_filename) or not os.path.exists(inv_filename):
+    if  not os.path.exists(fwd_filename) or not os.path.exists(inv_filename) or clobber:
         print('Registering')
-        fixed = ants.image_read(fixed_filename)
-        moving = ants.image_read(moving_filename)
-        moving_mask = ants.image_read(moving_mask_filename)
-        reg0 = ants.registration(
-            fixed=fixed, 
-            moving=moving, 
-            type_of_transform='SyN',
-            syn_metric = 'GC',
-            reg_iterations=(400, 200, 100),
-            mask=moving_mask, 
-            write_composite_transform=True,
-            verbose=True, 
-            output=f'{output_dir}/aligned.nii.gz'
+        print(fwd_filename)
+        print(inv_filename)
+        exit(0)
+        moving_prefix = os.path.basename(moving_filename).replace('.nii.gz','') 
+        fixed_prefix = os.path.basename(fixed_filename).replace('.nii.gz','')
+        
+        reg0 = ants.registration.Registration(
+            fixed_image=fixed_filename, 
+            moving_image=moving_filename, 
+            output_transform_prefix='{0}_affine_'.format(prefix),
+            output_warped_image='{0}_linear.nii.gz'.format(prefix),
+            initial_moving_transform_com=0,
+            winsorize_lower_quantile=0.05,
+            winsorize_upper_quantile=0.95,
+            interpolation='Linear',
+            use_histogram_matching=[True],
+            transforms=['Affine'],
+            transform_parameters=[(0.1,)],
+            metric=['MI'],
+            metric_weight=[1],
+            radius_or_number_of_bins=[32],
+            sampling_strategy=['Random'],
+            sampling_percentage=[0.5],
+            number_of_iterations=[[1600, 800, 400, 200]],
+            convergence_threshold=[1e-6],
+            convergence_window_size=[10],
+            shrink_factors=[[8, 4, 2, 1]],
+            smoothing_sigmas=[[3, 2, 1, 0]],
+            sigma_units=['vox'],
+            verbose=True
             )
         
-        reg = ants.registration(
-            fixed=fixed, 
-            moving=moving, 
-            type_of_transform='SyNOnly',
-            syn_metric = 'CC',
-            reg_iterations=(20, 10),
-            mask=moving_mask, 
-            transform_list = reg0['fwdtransforms'],
+        reg0.run()
+        reg0.outputs = reg0._list_outputs()
+
+        reg = ants.registration.Registration(
+            fixed_image=fixed_filename, 
+            moving_image=moving_filename, 
+            initial_moving_transform = reg0.outputs['composite_transform'],
             write_composite_transform=True,
             verbose=True, 
-            output=f'{output_dir}/aligned.nii.gz'
+            dimension=3,
+            float=False,
+            output_transform_prefix='{0}'.format(prefix),
+            output_warped_image='{0}linear+SyN.nii.gz'.format(prefix),
+            initial_moving_transform_com=0,
+            winsorize_lower_quantile=0.05,
+            winsorize_upper_quantile=0.95,
+            interpolation='Linear',
+            use_histogram_matching=[True],
+            transforms=['SyN'],
+            transform_parameters=[(0.1,)],
+            metric=['CC'],
+            metric_weight=[1],
+            radius_or_number_of_bins=[4],
+            sampling_strategy=['Random'],
+            sampling_percentage=[0.5],
+            number_of_iterations=[[800, 400, 200, 100]],
+            convergence_threshold=[1e-6],
+            convergence_window_size=[10],
+            shrink_factors=[[8, 4, 2, 1]],
+            smoothing_sigmas=[[3, 2, 1, 0]],
+            sigma_units=['vox']
             )
-        print(reg.items())
-        #  transforms
-        ants.write_transform( ants.read_transform(reg['fwdtransforms']), fwd_filename)
-        ants.write_transform( ants.read_transform(reg['invtransforms']), inv_filename)
-        reg['warpedmovout'].to_filename(f'{output_dir}/aligned.nii.gz')
+
+        reg.run()
+        reg.outputs = reg._list_outputs()
 
     for output_filename, filename in zip(output_files, files_to_transform):
-        if not os.path.exists(output_filename):
-            fixed = ants.image_read(fixed_filename)
-            print('Applying transform', output_filename)
-            img = ants.image_read(filename)
-            img = ants.apply_transforms(fixed=fixed, moving=img, transformlist=fwd_filename)
-            img.to_filename(output_filename)
-            output_files.append(output_filename)
-    
+        if not os.path.exists(output_filename) or clobber :
+            tfm = ApplyTransforms(
+                input_image=filename,
+                reference_image=fixed_filename,
+                output_image=output_filename,
+                transforms=fwd_filename,
+                interpolation='Linear',
+            )
+            tfm.run()
+
+
     return output_files
 
 def apply_surface_atlas(surf_files, atlas_file, output_dir, descriptor):
@@ -264,13 +323,14 @@ def apply_surface_atlas(surf_files, atlas_file, output_dir, descriptor):
 
     for surf_file in surf_files:
         values = load_gifti(surf_file).reshape(-1,)
+        print(surf_file)
         print('Mean:', np.mean(values), 'Values:', np.std(values) )
         #n = np.bincount(atlas)
         #totals = np.bincount(atlas, weights=surf)
         #mean = totals / n
         print(atlas.shape, values.shape)
         
-        label= os.path.basename(surf_file).replace('.nii.gz','').replace('macaque_','').replace('.npy','')
+        label= os.path.basename(surf_file).replace('.nii.gz','').replace('macaque_','').replace('.npy','').replace('.gii','')
         row = pd.DataFrame({'receptor':[label]*n, 'label':atlas, 'density':values})
         df = pd.concat([df,row])
     
@@ -284,6 +344,7 @@ def apply_surface_atlas(surf_files, atlas_file, output_dir, descriptor):
     #reindex 
     df = df.reset_index(drop=True)
 
+    print(df)
     plt.figure(figsize=(10,10))
     #sns.lineplot(x='atlas', y='density', hue='receptor', data=df)
     sns.color_palette("Set2")
@@ -292,7 +353,10 @@ def apply_surface_atlas(surf_files, atlas_file, output_dir, descriptor):
     g.set_xticklabels(['visual', 'auditory', 'somatosensory', 'limbic', 'dorsal attention', 'default mode network'])
     plt.savefig(f'{output_dir}/atlas_{descriptor}.png')
 
-wrk_dir='/home/thomas-funck/projects/fzj_macaque_receptor_atlas'
+# get the directory of this file
+current_file_path = os.path.abspath(__file__)
+wrk_dir = os.path.dirname(current_file_path)+'/../'
+
 if __name__ == '__main__' :
     parser = argparse.ArgumentParser(description='Volumetric Gradient Analysis')
     parser.add_argument('-m', dest='mask_file', default='data/volumes/MEBRAINS_segmentation_NEW_gm_left.nii.gz', type=str, help='Path to mask file')
@@ -342,7 +406,7 @@ if __name__ == '__main__' :
 
     ### Resize mask to receptor volume
     mask_rsl_file = resize_mask_to_receptor_volume(args.mask_file, receptor_volumes[0], args.output_dir)
-
+    
     if False :
         yerkes_receptor_surfaces = preprocess_surface(
             args.yerkes_wm_surf_filename,
@@ -357,47 +421,64 @@ if __name__ == '__main__' :
             align_dir
             )
         
-    receptor_volumes = align(args.yerkes_template_filename, args.mebrains_filename, mask_rsl_file, receptor_volumes, align_dir)
+    yerkes_receptor_volumes = align(
+        args.yerkes_template_filename, args.mebrains_filename, mask_rsl_file, receptor_volumes, align_dir, clobber=False
+        )
 
-    receptor_surfaces = project_to_surface( receptor_volumes, args.wm_surf_filename, args.gm_surf_filename, profiles_dir, agg_func=np.mean, clobber=False )
+    yerkes_receptor_surfaces = project_to_surface( 
+        yerkes_receptor_volumes, args.yerkes_wm_surf_filename, args.yerkes_gm_surf_filename, profiles_dir, agg_func=np.mean, clobber=False 
+        )
 
-    print('C')
     apply_surface_atlas(yerkes_receptor_surfaces, args.yerkes_atlas_filename, args.output_dir, 'receptor')
 
     #t1t2_analysis(mask_rsl_file, hist_volumes, t1t2_filename, args.output_dir)
     ### Resize MEBRAINS T1/T2 to receptor volume
-    t1t2_rsl_filename = resize_mask_to_receptor_volume( t1t2_filename, receptor_volumes[0], args.output_dir, order=3)
+    #t1t2_rsl_filename = resize_mask_to_receptor_volume( t1t2_filename, receptor_volumes[0], args.output_dir, order=3)
 
     ### Calculate entropy of receptor volumes
     entropy_file, std_file = entropy_analaysis(mask_rsl_file, receptor_volumes, entropy_dir)
 
-    yerkes_complexity_volumes = align(args.yerkes_template_filename, args.mebrains_filename, mask_rsl_file, [entropy_file, std_file], align_dir)
-
-    yerkes_complexity_surfaces = project_to_surface( yerkes_complexity_volumes,
+    yerkes_complexity_volumes = align(
+        args.yerkes_template_filename, args.mebrains_filename, mask_rsl_file, [entropy_file, std_file], align_dir
+        )
+    yerkes_entropy_volume = yerkes_complexity_volumes[0]
+    yerkes_std_volume = yerkes_complexity_volumes[1]
+                                        
+    yerkes_entropy_surfaces = project_to_surface( [yerkes_entropy_volume],
                                                      args.yerkes_wm_surf_filename, 
                                                      args.yerkes_gm_surf_filename,
                                                      yerkes_profiles_dir, 
                                                      agg_func=np.mean,
-                                                     clobber=False 
+                                                     clobber=True ,
+                                                     zscore=False
                                                      )
 
-    apply_surface_atlas(yerkes_complexity_surfaces, args.yerkes_atlas_filename, args.output_dir, 'complexity')
-    exit(0)
+    yerkes_std_surfaces = project_to_surface( [yerkes_std_volume],
+                                                     args.yerkes_wm_surf_filename, 
+                                                     args.yerkes_gm_surf_filename,
+                                                     yerkes_profiles_dir, 
+                                                     agg_func=np.mean,
+                                                     clobber=True,
+                                                     zscore=False
+                                                     )
 
+    apply_surface_atlas(yerkes_entropy_surfaces, args.yerkes_atlas_filename, args.output_dir, 'entropy')
+    apply_surface_atlas(yerkes_std_surfaces, args.yerkes_atlas_filename, args.output_dir, 'std')
 
     ### Calculate PCA gradients
-    gradient_volumes = volumetric_gradient_analysis(mask_rsl_file, receptor_volumes, grad_dir, approach='pca', n=args.n)
+    #gradient_volumes = volumetric_gradient_analysis(mask_rsl_file, receptor_volumes, grad_dir, approach='pca', n=args.n)
     #gradient_volumes = volumetric_gradient_analysis(mask_rsl_file, receptor_volumes, grad_dir, approach='le', n=args.n)
-    gradient_volumes = volumetric_gradient_analysis(mask_rsl_file, receptor_volumes, grad_dir, approach='dm', n=args.n)
+    #gradient_volumes = volumetric_gradient_analysis(mask_rsl_file, receptor_volumes, grad_dir, approach='dm', n=args.n)
 
     ### Calculate ratios between receptor volumes
-    ratio_dict = ratio_analysis(receptor_volumes, mask_rsl_file, ratio_dir )
-    ratio_volumes = [fn for fn,lab in ratio_dict.items() if lab in ['Ex', 'Inh', 'Mod']]
-    vif_analysis(ratio_volumes, mask_rsl_file, corr_dir)
-    vif_analysis(gradient_volumes, mask_rsl_file, corr_dir)
-    vif_analysis(receptor_volumes, mask_rsl_file, corr_dir)
-    plot_pairwise_correlation(receptor_volumes, mask_rsl_file, corr_dir)
-
+    ratio_dict = ratio_analysis(receptor_volumes, mask_rsl_file, ratio_dir, clobber=True )
+    summary_volumes = [fn for fn,lab in ratio_dict.items() if lab in ['Inh', 'Glutamate', 'Acetylcholine', 'Noradrenaline', 'Serotonin', 'Dopamine']]
+    vif_analysis(summary_volumes, mask_rsl_file, corr_dir)
+    plot_pairwise_correlation(summary_volumes, mask_rsl_file, corr_dir)
+    #vif_analysis(gradient_volumes, mask_rsl_file, corr_dir)
+    #vif_analysis(receptor_volumes, mask_rsl_file, corr_dir)
+    #plot_pairwise_correlation(receptor_volumes, mask_rsl_file, corr_dir)
+    exit(0)
     
 
     # Plot entropy on surface

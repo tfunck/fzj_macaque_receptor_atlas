@@ -6,17 +6,22 @@ import utils
 from scipy.ndimage import gaussian_filter
 
 
-def sum_volumes(volume_list, zscore=True, gauss_sd=0):
+def sum_volumes(volume_list, mask_vol, zscore=True, gauss_sd=0):
+    n=0
+    idx = mask_vol > 0
     for i, ligand in enumerate(volume_list):
         rec_vol = nib.load(ligand).get_fdata()
         if zscore:
-            rec_vol = (rec_vol - rec_vol.mean()) / rec_vol.std()
+            rec_vol[idx] = (rec_vol[idx] - rec_vol[idx].mean()) / rec_vol[idx].std()
+            rec_vol[~idx] = 0
 
         if i == 0:
             vol = rec_vol 
         else:
             vol += rec_vol
-
+        n += 1
+    
+    vol = vol / n
     if gauss_sd > 0:
         vol = gaussian_filter(vol,gauss_sd)
 
@@ -24,14 +29,14 @@ def sum_volumes(volume_list, zscore=True, gauss_sd=0):
 
 
 
-def create_volume(receptor_files, target_strings, output_filename):
+def create_volume(receptor_files, mask_vol, target_strings, output_filename, clobber=False):
 
-    if not os.path.exists(output_filename):
+    if not os.path.exists(output_filename) or clobber:
         file_list = utils.get_files_from_list( receptor_files, target_strings) 
         
         ref_img = nib.load(file_list[0])
 
-        summed_vol = sum_volumes(file_list )
+        summed_vol = sum_volumes(file_list, mask_vol )
 
         nib.Nifti1Image(summed_vol, ref_img.affine, ref_img.header).to_filename(output_filename)
     else :
@@ -48,10 +53,9 @@ def calc_ratio(vol0,vol1,mask):
     return out
 
 
-def ratio_analysis(receptor_files, mask_file, output_dir):
+def ratio_analysis(receptor_files, mask_file, output_dir, clobber=False):
     """Calculate ratios of receptor volumes"""
     os.makedirs(output_dir, exist_ok=True)
-
 
     exh_filename = f'{output_dir}/macaque_exh.nii.gz'
     inh_filename = f'{output_dir}/macaque_inh.nii.gz'
@@ -62,21 +66,41 @@ def ratio_analysis(receptor_files, mask_file, output_dir):
     ampakain_mk80_filename = f'{output_dir}/macaque_ratio_ampakain_mk80.nii.gz'
     inhexh_mod_filename = f'{output_dir}/macaque_ratio_inhexh_mod.nii.gz'
 
-    output_volumes = [exh_filename, inh_filename, mod_filename, gabaa_gabab_filename, exh_inh_filename,  inhexh_mod_filename ]
+    glut_filename = f'{output_dir}/macaque_glutamate.nii.gz'
+    acetyl_filename = f'{output_dir}/macaque_acetylcholine.nii.gz'
+    nodrad_filename = f'{output_dir}/macaque_noradrenaline.nii.gz'
+    serotonin_filename = f'{output_dir}/macaque_serotonin.nii.gz'
+    dopamine_filename = f'{output_dir}/macaque_dopamine.nii.gz'
 
-    cmap_label_list = ['Ex',  'Inh', 'Mod', 'GABAa/GABAb',  'Ex/Inh', '(Inh+Ex)/Mod']
+    output_volumes = [
+        exh_filename, inh_filename, mod_filename, 
+        gabaa_gabab_filename, exh_inh_filename,  inhexh_mod_filename, ampakain_mk80_filename,
+        glut_filename, acetyl_filename, nodrad_filename,  serotonin_filename #, dopamine_filename 
+        ]
+
+    cmap_label_list = [
+        'Ex',  'Inh', 'Mod', 
+        'GABAa/GABAb',  'Ex/Inh', '(Inh+Ex)/Mod', 'Ex. Ion/Metab',
+        'Glutamate', 'Acetylcholine', 'Noradrenaline', 'Serotonin' #, 'Dopamine'
+        ]
 
     output_dict = dict(zip(output_volumes, cmap_label_list))
 
-    if False in [os.path.exists(file) for file in output_volumes]:
+    if False in [os.path.exists(file) for file in output_volumes] or clobber:
 
         mask_vol = nib.load(mask_file).get_fdata()
 
         affine = nib.load(receptor_files[0]).affine
 
-        inh_vol = create_volume(receptor_files, ['musc', 'cgp5', 'flum'], inh_filename)
-        exh_vol = create_volume(receptor_files, ['ampa', 'kain', 'mk80'], exh_filename)
-        mod_vol = create_volume(receptor_files, ['dpat', 'uk14', 'oxot', 'keta', 'sch2', 'pire'], mod_filename)
+        inh_vol = create_volume(receptor_files, mask_vol, ['musc', 'cgp5', 'flum'], inh_filename, clobber=clobber)
+        exh_vol = create_volume(receptor_files, mask_vol, ['ampa', 'kain', 'mk80'], exh_filename, clobber=clobber)
+        mod_vol = create_volume(receptor_files, mask_vol, ['dpat', 'uk14', 'oxot', 'keta', 'sch2', 'pire'], mod_filename, clobber=clobber)
+
+        glut_vol = create_volume(receptor_files, mask_vol, ['ampa', 'kain', 'mk80'], glut_filename, clobber=clobber)
+        acetyl_vol = create_volume(receptor_files, mask_vol, ['damp', 'pire', 'oxot'], acetyl_filename, clobber=clobber)
+        norad_vol = create_volume(receptor_files, mask_vol, ['praz', 'uk14'], nodrad_filename, clobber=clobber)
+        serotonin_vol = create_volume(receptor_files, mask_vol, ['dpat', 'keta'], serotonin_filename, clobber=clobber)
+        #dopamine_vol = create_volume(receptor_files, ['sch2'], dopamine_filename) #add racl later
 
         print('Exhibitory / Inhibitory')
         exh_inh_vol = calc_ratio(exh_vol, inh_vol, mask_vol)
