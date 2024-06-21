@@ -29,10 +29,11 @@ def sum_volumes(volume_list, mask_vol, zscore=True, gauss_sd=0):
 
 
 
-def create_volume(receptor_files, mask_vol, target_strings, output_filename, clobber=False):
+def create_volume(receptor_files, target_strings, output_filename, clobber=False):
 
+    file_list = utils.get_files_from_list( receptor_files, target_strings) 
+    
     if not os.path.exists(output_filename) or clobber:
-        file_list = utils.get_files_from_list( receptor_files, target_strings) 
         
         ref_img = nib.load(file_list[0])
 
@@ -42,7 +43,7 @@ def create_volume(receptor_files, mask_vol, target_strings, output_filename, clo
     else :
         summed_vol = nib.load(output_filename).get_fdata()
 
-    return summed_vol
+    return summed_vol, file_list
 
 def calc_ratio(vol0,vol1,mask):
     out = np.zeros_like(vol0)
@@ -86,21 +87,18 @@ def ratio_analysis(receptor_files, mask_file, output_dir, clobber=False):
 
     output_dict = dict(zip(output_volumes, cmap_label_list))
 
-    if False in [os.path.exists(file) for file in output_volumes] or clobber:
+
+    inh_vol, inh_list = create_volume(receptor_files, ['musc', 'cgp5', 'flum'], inh_filename, clobber=clobber)
+    exh_vol, exh_list = create_volume(receptor_files, ['ampa', 'kain', 'mk80'], exh_filename, clobber=clobber)
+    mod_vol, mod_list = create_volume(receptor_files, ['dpat', 'uk14', 'oxot', 'keta', 'sch2', 'pire'], mod_filename, clobber=clobber)
+
+    if False in [os.path.exists(file) for file in output_volumes]:
 
         mask_vol = nib.load(mask_file).get_fdata()
 
         affine = nib.load(receptor_files[0]).affine
 
-        inh_vol = create_volume(receptor_files, mask_vol, ['musc', 'cgp5', 'flum'], inh_filename, clobber=clobber)
-        exh_vol = create_volume(receptor_files, mask_vol, ['ampa', 'kain', 'mk80'], exh_filename, clobber=clobber)
-        mod_vol = create_volume(receptor_files, mask_vol, ['dpat', 'uk14', 'oxot', 'keta', 'sch2', 'pire'], mod_filename, clobber=clobber)
-
-        glut_vol = create_volume(receptor_files, mask_vol, ['ampa', 'kain', 'mk80'], glut_filename, clobber=clobber)
-        acetyl_vol = create_volume(receptor_files, mask_vol, ['damp', 'pire', 'oxot'], acetyl_filename, clobber=clobber)
-        norad_vol = create_volume(receptor_files, mask_vol, ['praz', 'uk14'], nodrad_filename, clobber=clobber)
-        serotonin_vol = create_volume(receptor_files, mask_vol, ['dpat', 'keta'], serotonin_filename, clobber=clobber)
-        #dopamine_vol = create_volume(receptor_files, ['sch2'], dopamine_filename) #add racl later
+        
 
         print('Exhibitory / Inhibitory')
         exh_inh_vol = calc_ratio(exh_vol, inh_vol, mask_vol)
@@ -123,4 +121,4 @@ def ratio_analysis(receptor_files, mask_file, output_dir, clobber=False):
         inhexh_mod_vol = calc_ratio( (inh_vol + exh_vol), mod_vol, mask_vol)
         nib.Nifti1Image(inhexh_mod_vol, affine).to_filename(inhexh_mod_filename)
 
-    return output_dict
+    return output_dict, [inh_list, exh_list, mod_list]
