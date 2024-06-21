@@ -20,8 +20,8 @@ def calc_volume_probabilities(volume_data, nbins):
     # e.g., volume_data = [.1, .1, .5]
     print('Calculating probabilities with bins:', nbins, '...')
     counts, bins = np.histogram(volume_data, bins=nbins)
-    print(len(counts))
-    
+
+
     # assign the voxel into bins based on their intensities
     # e.g., voxel_bins = [1, 1, 2]
     voxel_bins = np.digitize(volume_data, bins[1:])
@@ -101,15 +101,19 @@ def plot_entropy_figure(entropy, prob_filename_list, output_dir):
     plt.savefig(f'{output_dir}/figure_entropy.png')
 
 
-def calc_entropy_volume(volumes, mask_file, output_dir,nbins=2048, clobber=False):
-    """Calculate the voxelwise entropy over a set of volumes"""
-    os.makedirs(output_dir, exist_ok=True)
+def entropy_analaysis(mask_file, volumes, output_dir, nbins=2048, clobber=False):
+    """Calculate the entropy of receptor volumes and compare to gradient volumes"""
+    os.makedirs(output_dir, exist_ok=True)    
 
-    
     output_filename = os.path.join(output_dir, 'entropy.nii.gz')
     std_output_filename = os.path.join(output_dir, 'std.nii.gz')
+    mean_output_filename = os.path.join(output_dir, 'mean.nii.gz')
 
-    if not os.path.exists(output_filename) or not os.path.exists(std_output_filename) or clobber:
+    if not os.path.exists(output_filename) or\
+        not os.path.exists(std_output_filename) or\
+        not os.path.exists(mean_output_filename) or\
+        clobber:
+
         prob_filename_list = []
 
         mask = nib.load(mask_file)
@@ -145,23 +149,12 @@ def calc_entropy_volume(volumes, mask_file, output_dir,nbins=2048, clobber=False
         plot_entropy_figure(entropy_vol, prob_filename_list, output_dir)
 
         std_vol = np.zeros(mask_vol.shape)
+        mean_vol = np.zeros(mask_vol.shape)
         std_vol[valid_idx] = np.std(voxels, axis=0) 
+        mean_vol[valid_idx] = np.mean(voxels, axis=0)
 
+        nib.Nifti1Image(mean_vol, nib.load(volumes[0]).affine).to_filename(mean_output_filename)
         nib.Nifti1Image(std_vol, nib.load(volumes[0]).affine).to_filename(std_output_filename)
         nib.Nifti1Image(entropy_vol, nib.load(volumes[0]).affine).to_filename(output_filename)
 
-    return output_filename, std_output_filename
-
-def entropy_analaysis(mask_file, receptor_volumes, output_dir):
-    """Calculate the entropy of receptor volumes and compare to gradient volumes"""
-    os.makedirs(output_dir, exist_ok=True)    
-
-    output_filename = os.path.join(output_dir, 'entropy.nii.gz')
-
-    entropy_file, std_file = calc_entropy_volume(receptor_volumes, mask_file, output_dir)
-
-    return entropy_file, std_file
-
-
-
-
+    return output_filename, std_output_filename, mean_output_filename
