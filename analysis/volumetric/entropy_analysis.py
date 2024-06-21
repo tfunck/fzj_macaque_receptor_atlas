@@ -102,12 +102,20 @@ def plot_entropy_figure(entropy, prob_filename_list, output_dir):
 
 
 def calc_entropy_volume(volumes, mask_file, output_dir,nbins=2048, clobber=False):
+
+
+    return output_filename, std_output_filename
+
+def entropy_analaysis(mask_file, volumes, output_dir, descriptor='all', nbins=64, clobber=False):
+    """Calculate the entropy of receptor volumes and compare to gradient volumes"""
+
+    output_filename = os.path.join(output_dir, f'entropy_{descriptor}.nii.gz')
+
     """Calculate the voxelwise entropy over a set of volumes"""
     os.makedirs(output_dir, exist_ok=True)
 
-    
-    output_filename = os.path.join(output_dir, 'entropy.nii.gz')
-    std_output_filename = os.path.join(output_dir, 'std.nii.gz')
+    std_output_filename = os.path.join(output_dir, f'std_{descriptor}.nii.gz')
+    mean_output_filename = os.path.join(output_dir, f'mean_{descriptor}.nii.gz')
 
     if not os.path.exists(output_filename) or not os.path.exists(std_output_filename) or clobber:
         prob_filename_list = []
@@ -147,20 +155,15 @@ def calc_entropy_volume(volumes, mask_file, output_dir,nbins=2048, clobber=False
         std_vol = np.zeros(mask_vol.shape)
         std_vol[valid_idx] = np.std(voxels, axis=0) 
 
+        mean_vol = np.zeros(mask_vol.shape)
+        mean_vol[valid_idx] = np.mean(voxels, axis=0)
+
+
         nib.Nifti1Image(std_vol, nib.load(volumes[0]).affine).to_filename(std_output_filename)
         nib.Nifti1Image(entropy_vol, nib.load(volumes[0]).affine).to_filename(output_filename)
+        nib.Nifti1Image(mean_vol, nib.load(volumes[0]).affine).to_filename(mean_output_filename)
 
-    return output_filename, std_output_filename
-
-def entropy_analaysis(mask_file, receptor_volumes, output_dir):
-    """Calculate the entropy of receptor volumes and compare to gradient volumes"""
-    os.makedirs(output_dir, exist_ok=True)    
-
-    output_filename = os.path.join(output_dir, 'entropy.nii.gz')
-
-    entropy_file, std_file = calc_entropy_volume(receptor_volumes, mask_file, output_dir)
-
-    return entropy_file, std_file
+    return output_filename, mean_output_filename, std_output_filename
 
 
 

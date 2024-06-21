@@ -24,10 +24,11 @@ def sum_volumes(volume_list, zscore=True, gauss_sd=0):
 
 
 
-def create_volume(receptor_files, target_strings, output_filename):
+def create_volume(receptor_files, target_strings, output_filename, clobber=False):
 
-    if not os.path.exists(output_filename):
-        file_list = utils.get_files_from_list( receptor_files, target_strings) 
+    file_list = utils.get_files_from_list( receptor_files, target_strings) 
+    
+    if not os.path.exists(output_filename) or clobber:
         
         ref_img = nib.load(file_list[0])
 
@@ -37,7 +38,7 @@ def create_volume(receptor_files, target_strings, output_filename):
     else :
         summed_vol = nib.load(output_filename).get_fdata()
 
-    return summed_vol
+    return summed_vol, file_list
 
 def calc_ratio(vol0,vol1,mask):
     out = np.zeros_like(vol0)
@@ -48,7 +49,7 @@ def calc_ratio(vol0,vol1,mask):
     return out
 
 
-def ratio_analysis(receptor_files, mask_file, output_dir):
+def ratio_analysis(receptor_files, mask_file, output_dir, clobber=False):
     """Calculate ratios of receptor volumes"""
     os.makedirs(output_dir, exist_ok=True)
 
@@ -68,15 +69,18 @@ def ratio_analysis(receptor_files, mask_file, output_dir):
 
     output_dict = dict(zip(output_volumes, cmap_label_list))
 
+
+    inh_vol, inh_list = create_volume(receptor_files, ['musc', 'cgp5', 'flum'], inh_filename, clobber=clobber)
+    exh_vol, exh_list = create_volume(receptor_files, ['ampa', 'kain', 'mk80'], exh_filename, clobber=clobber)
+    mod_vol, mod_list = create_volume(receptor_files, ['dpat', 'uk14', 'oxot', 'keta', 'sch2', 'pire'], mod_filename, clobber=clobber)
+
     if False in [os.path.exists(file) for file in output_volumes]:
 
         mask_vol = nib.load(mask_file).get_fdata()
 
         affine = nib.load(receptor_files[0]).affine
 
-        inh_vol = create_volume(receptor_files, ['musc', 'cgp5', 'flum'], inh_filename)
-        exh_vol = create_volume(receptor_files, ['ampa', 'kain', 'mk80'], exh_filename)
-        mod_vol = create_volume(receptor_files, ['dpat', 'uk14', 'oxot', 'keta', 'sch2', 'pire'], mod_filename)
+        
 
         print('Exhibitory / Inhibitory')
         exh_inh_vol = calc_ratio(exh_vol, inh_vol, mask_vol)
@@ -99,4 +103,4 @@ def ratio_analysis(receptor_files, mask_file, output_dir):
         inhexh_mod_vol = calc_ratio( (inh_vol + exh_vol), mod_vol, mask_vol)
         nib.Nifti1Image(inhexh_mod_vol, affine).to_filename(inhexh_mod_filename)
 
-    return output_dict
+    return output_dict, [inh_list, exh_list, mod_list]

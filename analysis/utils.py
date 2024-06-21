@@ -25,7 +25,6 @@ def plot_explained_variance(gm, output_dir, threshold=0.95):
     print('Explained Variance:', exp_var)
     print('Sum of Explained Variance:', exp_var.sum())
 
-    return n
     #exp_var= exp_var[exp_var > 0.05 ]
     
     plt.figure(figsize=(10, 5))

@@ -28,40 +28,61 @@ def msm_align(
 
     base = os.path.basename(moving_sphere).replace('.surf.gii','')
     
-    sphere_out = f'{data_out}sphere.reg.surf.gii'
+    out_sphere = f'{data_out}sphere.reg.surf.gii'
+    
 
-    if not os.path.exists(sphere_out)  or clobber :
-        cmd = f"msm --inmesh={moving_sphere} --indata={moving_data} --refmesh={fixed_sphere} --refdata={fixed_data} --out={data_out} --levels=4 --verbose=1"
+    if not os.path.exists(out_sphere)  or clobber :
+        cmd = f"msm --inmesh={moving_sphere} --indata={moving_data} --refmesh={fixed_sphere} --refdata={fixed_data} --out={data_out} --levels=2 --verbose=1"
+        print(cmd)
+        subprocess.run(cmd, shell=True, executable="/bin/bash")
+        # following example of msmresample works:
+        cmd=f"msmresample {out_sphere} {output_dir}/moving_data_rsl -labels {moving_data} -project {fixed_sphere} -adap_bary"
         print(cmd)
         subprocess.run(cmd, shell=True, executable="/bin/bash")
 
-    metrics_rsl_list = msm_resample(sphere_out, fixed_sphere, moving_data, output_dir, clobber=True)
-    return sphere_out, data_out, metrics_rsl_list
+        plot_receptor_surf(
+            [f'{output_dir}/moving_data_rsl.func.gii'], 
+            fixed_sphere, output_dir,  label='mv_rsl', cmap='nipy_spectral')
 
-def msm_resample_list(reg_mesh, target_mesh, labels, output_dir):
+        plot_receptor_surf(
+            [fixed_data], 
+            fixed_sphere, output_dir,  label='fx_orig', cmap='nipy_spectral')
+
+        plot_receptor_surf(
+            [f'{data_out}transformed_and_reprojected.func.gii'], 
+            fixed_sphere, output_dir,  label='mv_warpedproj', cmap='nipy_spectral')
+
+    metrics_rsl_list = msm_resample(out_sphere, fixed_sphere, moving_data, clobber=clobber)
+
+    return out_sphere, data_out, metrics_rsl_list
+
+def msm_resample_list(rsl_mesh, fixed_mesh, labels, output_dir, clobber=False):
     """Apply MSM to labels."""
     labels_rsl_list = []
     for label in labels:
         #input_mesh.sphere.reg.gii output_metric_basename -labels input_metric.func.gii -project target_mesh.surf,gii -adap_bary
         print('Resampling label\n\t', label)
-        print('to\n\t', reg_mesh)
-        label_rsl_filename = msm_resample(reg_mesh, target_mesh, label, output_dir)[0]
+        print('to\n\t', rsl_mesh)
+        label_rsl_filename = msm_resample(rsl_mesh, fixed_mesh, label, clobber=clobber)[0]
 
         labels_rsl_list.append(label_rsl_filename) #FIXME
 
     return labels_rsl_list
 
-def msm_resample(reg_mesh, target_mesh, output_dir, label=None, clobber=False):
+def msm_resample(rsl_mesh, fixed_mesh, label=None, clobber=False):
     output_label_basename = label.replace('.func','').replace('.gii','') + '_rsl'
     output_label = f'{output_label_basename}.func.gii'
     template_label_rsl_filename = f'{output_label_basename}.func.gii'
-    cmd = f"msmresample {reg_mesh} {output_label_basename} -project {target_mesh} -adap_bary"
-    if label is not None :
-        cmd += f" -labels {label}"
-    print(cmd);
-    subprocess.run(cmd, shell=True, executable="/bin/bash")
 
-    n = nib.load(target_mesh).get_arrays_from_intent('NIFTI_INTENT_POINTSET')[0].data.shape[0]
+    cmd = f"msmresample {rsl_mesh} {output_label_basename} -project {fixed_mesh} -adap_bary"
+
+    if not os.path.exists(output_label) or clobber:
+        if label is not None :
+            cmd += f" -labels {label}"
+        print(cmd);
+        subprocess.run(cmd, shell=True, executable="/bin/bash")
+
+    n = nib.load(fixed_mesh).get_arrays_from_intent('NIFTI_INTENT_POINTSET')[0].data.shape[0]
 
     label_rsl_list = [] 
     darrays = nib.load(output_label).darrays
@@ -77,13 +98,14 @@ def msm_resample(reg_mesh, target_mesh, output_dir, label=None, clobber=False):
     return label_rsl_list
 
 
-def fix_surf(surf_fn, output_dir):
+def fix_surf(surf_fn, output_dir ):
     """Fix surface by using surface-modify-sphere command."""
     base = os.path.basename(surf_fn).replace('.surf.gii','')
-    sphere_2_fn = f"{output_dir}/{base}.surf.gii" 
-    cmd = f"wb_command -surface-modify-sphere {surf_fn} 100 {sphere_2_fn}"
+    out_fn = f"{output_dir}/{base}.surf.gii" 
+    cmd = f"wb_command -surface-modify-sphere {surf_fn} 100 {out_fn}"
+
     subprocess.run(cmd, shell=True, executable="/bin/bash")    
-    return sphere_2_fn
+    return out_fn
 
 
 def get_surface_sulcal_depth(surf_filename, output_dir, n=10, clobber=False):
@@ -109,6 +131,18 @@ def get_surface_sulcal_depth(surf_filename, output_dir, n=10, clobber=False):
     assert os.path.exists(sulc_filename), f"Could not find sulcal depth file {sulc_filename}"
     return sulc_filename, inflated_filename
 
+def resample_label(label_in, sphere_fn, sphere_rsl_fn, output_dir, clobber=False):
+    n = nib.load(sphere_rsl_fn).darrays[0].data.shape[0]
+    label_out = f'{output_dir}/n-{n}_{os.path.basename(label_in)}'
+
+    if not os.path.exists(label_out) or clobber:
+        cmd = f'wb_command -label-resample {label_in} {sphere_fn} {sphere_rsl_fn} BARYCENTRIC {label_out} -largest'
+        print(cmd)
+        subprocess.run(cmd, shell=True, executable="/bin/bash")
+    assert os.path.exists(label_out), f"Could not find resampled label {label_out}" 
+
+    return label_out
+
 def resample_surface(surface_in, sphere_fn, sphere_rsl_fn, output_dir, n, clobber=False):
     surface_out = f'{output_dir}/n-{n}_{os.path.basename(surface_in)}'
 
@@ -117,6 +151,7 @@ def resample_surface(surface_in, sphere_fn, sphere_rsl_fn, output_dir, n, clobbe
         print(cmd)
         subprocess.run(cmd, shell=True, executable="/bin/bash")
     assert os.path.exists(surface_out), f"Could not find resampled surface {surface_out}" 
+
     return surface_out
 
 def remesh_surface(surface_in,  output_dir, n=10000, clobber=False):
@@ -140,7 +175,7 @@ def get_fs_prefix(surf_filename):
     return target_prefix
     
 
-def get_surface_curvature(surf_filename, output_dir , clobber=False):
+def get_surface_curvature(surf_filename, output_dir ,n=10, clobber=False):
     """Get surface curvature using mris_curvature."""
 
     target_prefix = get_fs_prefix(surf_filename)
@@ -158,7 +193,7 @@ def get_surface_curvature(surf_filename, output_dir , clobber=False):
     curv_filename = f'{dirname}/{base}.H'
     output_filename = f'{output_dir}/{base}.H'
     if not os.path.exists(output_filename) or clobber :
-        cmd = f"mris_curvature -w  {surf_filename}"
+        cmd = f"mris_curvature -w -a {n}  {surf_filename}"
         print(cmd)
         subprocess.run(cmd, shell=True, executable="/bin/bash")
         shutil.move(curv_filename, output_filename)
@@ -179,12 +214,12 @@ def convert_fs_morph_to_gii(input_filename, output_dir, clobber=False)  :
         nib.save(g, output_filename)
     return output_filename
 
-def convert_fs_to_gii(input_filename, output_dir, clobber=True):
+def convert_fs_to_gii(input_filename, output_dir, clobber=False):
     """Convert FreeSurfer surface to GIFTI."""
     base = os.path.splitext(os.path.basename(input_filename))[0]
     output_filename = f'{output_dir}/{base}.surf.gii'
 
-    if not os.path.exists(output_filename) or True:
+    if not os.path.exists(output_filename) or clobber:
         ar = read_geometry(input_filename)
         coordsys = nib.gifti.GiftiCoordSystem(dataspace='NIFTI_XFORM_TALAIRACH', xformspace='NIFTI_XFORM_TALAIRACH')
         g = nib.gifti.GiftiImage()
@@ -195,24 +230,39 @@ def convert_fs_to_gii(input_filename, output_dir, clobber=True):
     return output_filename
 
 
+
+def create_zyaxis_file(surf_filename, curv_filename, output_dir, clobber=False):
+    """Create a gifti file with the product of z and y coordinates as the data."""
+    base = os.path.basename(surf_filename).replace('.surf.gii','')
+    output_filename = f'{output_dir}/{base}_zyaxis.func.gii'
+    if not os.path.exists(output_filename) or clobber:
+        coords, _ = mesh_utils.load_mesh_ext(surf_filename)
+        curv = load_gifti(curv_filename)
+        zyaxis = coords[:,2] * coords[:,1]
+        zyaxis = (zyaxis - zyaxis.min()) / (zyaxis.max() - zyaxis.min())
+        write_gifti(zyaxis, output_filename)
+    return output_filename
+
 def get_surface_metrics(surf_filename, output_dir, clobber=False):
     base = os.path.basename(surf_filename).replace('.surf.gii','')
     output_file = f'{output_dir}/lh.{base}_metrics.func.gii'
     
-    fs_sulc_filename, _ = get_surface_sulcal_depth(surf_filename, output_dir,n=3, clobber=clobber)
-    fs_curv_filename = get_surface_curvature(surf_filename, output_dir, clobber=clobber)
+    fs_sulc_filename, _ = get_surface_sulcal_depth(surf_filename, output_dir,n=10, clobber=clobber)
+    fs_curv_filename = get_surface_curvature(surf_filename, output_dir, n=100, clobber=clobber)
 
     sulc_filename = convert_fs_morph_to_gii(fs_sulc_filename, output_dir, clobber=clobber)
     curv_filename = convert_fs_morph_to_gii(fs_curv_filename, output_dir, clobber=clobber)
+    zyaxis_filename = create_zyaxis_file(surf_filename, curv_filename, output_dir, clobber=clobber)
 
     if not os.path.exists(output_file) or clobber:
         # merge input metrics
         #wb_command -metric-merge output_name.func.gii -metric metric1.func.gii -metric metric2.func.gii -metric metric3.func.gii
         #cmd = f"wb_command -metric-merge {output_file} -metric {sulc_filename} -metric {curv_filename}"
-        cmd = f"wb_command -metric-merge {output_file} -metric {curv_filename} "
+        cmd = f"wb_command -metric-merge {output_file} -metric {sulc_filename} "
+        #cmd = f"wb_command -metric-merge {output_file} -metric {zyaxis_filename} "
         subprocess.run(cmd, shell=True, executable="/bin/bash")
     
-    return output_file, {'sulc':sulc_filename, 'curv':curv_filename} 
+    return output_file, {'sulc':sulc_filename, 'curv':curv_filename, 'zyaxis':zyaxis_filename} 
 
 def write_gifti(array, filename, intent='NIFTI_INTENT_SHAPE'):
     gifti_img = nib.gifti.gifti.GiftiImage()
@@ -234,11 +284,16 @@ def project_to_surface(
         sigma=0, 
         zscore=True,
         agg_func=None,
+        bound0=0,
+        bound1=None,
         clobber:bool=False
         ):
     """Project recosntructions to Yerkes Surface"""
     os.makedirs(output_dir, exist_ok=True)
     profile_list = []
+
+    if bound1 is None:
+        bound1 = n
 
     for receptor_volume in receptor_volumes:
         profile_fn = f"{output_dir}/{os.path.basename(receptor_volume).replace('.nii.gz','')}.gii"
@@ -279,7 +334,7 @@ def project_to_surface(
 
             # Save profiles
             if agg_func is not None:
-                profiles = agg_func(profiles, axis=1).reshape(-1,)
+                profiles = agg_func(profiles[:,bound0:bound1], axis=1).reshape(-1,)
 
             # save profiles as func.gii with nibabel
             write_gifti(profiles, profile_fn)
@@ -319,6 +374,7 @@ def project_and_plot_surf(
 
     for surface_filename in surface_data_list :
         label = os.path.basename(surface_filename).replace('.func.gii','')
+        """
         plot_receptor_surf( 
             [surface_filename], 
             wm_surf_filename, 
@@ -328,7 +384,7 @@ def project_and_plot_surf(
             threshold=threshold,
             cmap=cmap
             )
-
+        """
     return  surface_data_list
 
 
@@ -346,7 +402,7 @@ def plot_receptor_surf(
     """Plot receptor profiles on the cortical surface"""
     os.makedirs(output_dir, exist_ok=True)
 
-    filename = f"{output_dir}/surf_profiles_{label}.png" 
+    filename = f"{output_dir}/{label}_surf.png" 
     coords, faces = mesh_utils.load_mesh_ext(cortex_filename)
     
     try :
@@ -367,6 +423,8 @@ def plot_receptor_surf(
 
     #vmin, vmax = np.nanmax(receptor)*threshold[0], np.nanmax(receptor)*threshold[1]
     vmin, vmax = np.percentile(receptor, threshold)
+    print('real threshold', threshold)
+    print(f'\tWriting {filename}')
     plot_surf(  coords, 
                 faces, 
                 receptor, 
@@ -409,28 +467,29 @@ def preprocess_surface(
         moving_mid_cortex,
         moving_gm_cortex, 
         moving_sphere, 
-        receptor_volumes,
+        volume_feature_dict,
         output_dir,
         clobber=False
         ):
     """Preprocess surfaces to get receptor volumes on fixed surface."""
+    os.makedirs(output_dir,exist_ok=True)
     n_fixed_vertices = nib.load(fixed_sphere).darrays[0].data.shape[0]
-    clobber = True
     moving_sphere_orig = convert_fs_to_gii(moving_sphere, output_dir, clobber=clobber)
     moving_sphere = remesh_surface(moving_sphere, output_dir, n_fixed_vertices , clobber=clobber)
     moving_mid_cortex = resample_surface(moving_mid_cortex, moving_sphere_orig, moving_sphere, output_dir, n_fixed_vertices, clobber=clobber)
+    moving_wm_cortex = resample_surface(moving_wm_cortex, moving_sphere_orig, moving_sphere, output_dir, n_fixed_vertices, clobber=clobber)
+    moving_gm_cortex = resample_surface(moving_gm_cortex, moving_sphere_orig, moving_sphere, output_dir, n_fixed_vertices, clobber=clobber)
 
     fixed_metrics, fixed_metrics_dict =  get_surface_metrics(fixed_mid_cortex, output_dir, clobber=clobber) 
     moving_metrics, moving_metrics_dict = get_surface_metrics(moving_mid_cortex, output_dir, clobber=clobber) 
 
     # Quality control for surface alignment
-    
     for label, metric in fixed_metrics_dict.items():
-        plot_receptor_surf([metric], fixed_mid_cortex, output_dir,  label='fx_'+label, cmap='viridis')
+        plot_receptor_surf([metric], fixed_mid_cortex, output_dir,  label='fx_'+label, cmap='nipy_spectral')
     
     for label, metric in moving_metrics_dict.items():
-        plot_receptor_surf([metric], moving_mid_cortex, output_dir,  label='mv_'+label, cmap='viridis')
-
+        plot_receptor_surf([metric], moving_mid_cortex, output_dir,  label='mv_'+label, cmap='nipy_spectral')
+    
     warped_sphere, warped_data, metrics_rsl_list = msm_align(
         fixed_sphere, 
         fixed_metrics, 
@@ -440,31 +499,48 @@ def preprocess_surface(
         clobber=clobber
     )
 
-    warped_moving_mid_cortex = msm_resample()
-
-    darrays = nib.load(warped_data).darrays
-    for i, darray in enumerate(darrays):
-        curr_label_rsl_filename = f'{output_dir}/warped_{i}.func.gii'
-        if not os.path.exists(curr_label_rsl_filename) or clobber:
-            metric = darray.data.astype(np.float32)
-            print('Writing to\n\t', curr_label_rsl_filename)
-            plot_receptor_surf([metric], warped_moving_mid_cortex, output_dir, label=f'warped_mv_{i}',  cmap='viridis')
-    
     for i, metric in enumerate(metrics_rsl_list):
-        plot_receptor_surf([metric], fixed_mid_cortex, output_dir, label=f'warped_fx_{i}',  cmap='viridis')
-    exit(0)
+        plot_receptor_surf([metric], fixed_mid_cortex, output_dir, label=f'warped_fx_{i}',  cmap='nipy_spectral')
 
-    moving_receptor_surfaces = project_to_surface(
-        receptor_volumes, 
-        moving_wm_cortex, 
-        moving_gm_cortex, 
-        output_dir, 
-        agg_func=np.mean,
-        clobber=True
-        )
+    clobber=True
     
-    warped_receptor_surfaces = msm_resample_list(warped_sphere, fixed_sphere, moving_receptor_surfaces, output_dir)
-    exit(0)
+    warped_feature_surfaces = {}
+    for  label, volumes in volume_feature_dict.items():
+        zscore=True
+        if 'entropy' in label or 'std' in label:
+            zscore=False
 
-    return warped_receptor_surfaces
+        moving_feature_surfaces = project_to_surface(
+            volumes, 
+            moving_wm_cortex, 
+            moving_gm_cortex, 
+            output_dir, 
+            agg_func=np.mean,
+            zscore=zscore,
+            bound0=0,
+            bound1=7,
+            clobber=clobber
+            )
+
+        for surface_filename in moving_feature_surfaces : 
+            surf_label = os.path.basename(surface_filename).replace('.func.gii','')
+            if 'entropy' in surf_label:
+                threshold=[10,98]
+            else :
+                threshold=[2,98]
+            print('THRESHOLD', threshold)
+            plot_receptor_surf([surface_filename], moving_mid_cortex, output_dir, label=f'{surf_label}_mv',  cmap='nipy_spectral', threshold=threshold)
+
+        warped_feature_surfaces[label] = msm_resample_list(warped_sphere, fixed_sphere, moving_feature_surfaces, output_dir)
+
+        for surface_filename in warped_feature_surfaces[label] : 
+            print(label, surface_filename)
+            if 'entropy' in surf_label:
+                threshold=[10,98]
+            else :
+                threshold=[2,98]
+            surf_label = os.path.basename(surface_filename).replace('.func.gii','')
+            plot_receptor_surf([surface_filename], fixed_mid_cortex, output_dir, label=f'{surf_label}_warp',  cmap='nipy_spectral', threshold=threshold)
+    exit(0)
+    return warped_feature_surfaces
 

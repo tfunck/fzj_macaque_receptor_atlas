@@ -45,7 +45,7 @@ def get_voxel_receptor_values(receptor_volumes, vxl, output_dir):
 
     return receptor_features
 
-def create_component_volumes(gm, vxl, mask_file, n, output_dir):
+def create_component_volumes(gm, vxl, mask_file, n, output_filenames, clobber=False):
     """Create nifti files for each gradient component."""
     mask = nib.load(mask_file)
 
@@ -55,49 +55,51 @@ def create_component_volumes(gm, vxl, mask_file, n, output_dir):
 
     mask_vol = mask.get_fdata()
 
-    output_filenames = []
+
     sparse_vol = np.zeros(mask_vol.shape)
 
-    for component in range(n):
-        grad_values = gm.gradients_[:, component]
+    if False in [os.path.exists(file) for file in output_filenames] or clobber :
+        for grad_filename, component in zip(output_filenames, range(n)):
+            grad_values = gm.gradients_[:, component]
 
-        sparse_vol[vxl] = (grad_values-  grad_values.min()) + 1
-        print('Component:', component)
-        print(np.unique(grad_values))
-        print(np.unique(mask_vol))
-        out_vol = fill_in_missing_voxels(
-            sparse_vol,
-            mask_vol,
-            starts[1],
-            dimensions[1] * steps[1] + starts[1],
-            starts[1],
-            steps[1],
-        )
+            sparse_vol[vxl] = (grad_values-  grad_values.min()) + 1
+            print('Component:', component)
+            print(np.unique(grad_values))
+            print(np.unique(mask_vol))
+            out_vol = fill_in_missing_voxels(
+                sparse_vol,
+                mask_vol,
+                starts[1],
+                dimensions[1] * steps[1] + starts[1],
+                starts[1],
+                steps[1],
+            )
 
-        grad_filename = f'{output_dir}/macaque_gradient_{component}.nii.gz' 
-        output_filenames.append(grad_filename)
-    
-        nib.Nifti1Image(out_vol, mask.affine).to_filename(
-            grad_filename
-        )
+        
+            nib.Nifti1Image(out_vol, mask.affine).to_filename(
+                grad_filename
+            )
     return output_filenames
 
 
-def volumetric_gradient_analysis(mask_file, receptor_volumes, output_dir, approach='pca', n=20000):
+def volumetric_gradient_analysis(mask_file, receptor_volumes, output_dir, approach='pca', n=20000, clobber=False):
     """Perform volumetric gradient analysis on receptor data."""
     output_dir = f'{output_dir}/{approach}/'
     os.makedirs(output_dir, exist_ok=True)
     
-    run_grad_analysis =  True #False in [os.path.exists(file) for file in output_files]
-
-    if run_grad_analysis : #or True:
+    output_filenames = [  f'{output_dir}/macaque_gradient_{i}.nii.gz' for i in range(3)]
+    run_grad_analysis =  False in [os.path.exists(file) for file in output_filenames]
+    print('n=',n)
+    if run_grad_analysis or clobber :
         vxl = get_random_voxels(mask_file, n=n)
 
         # Return a 2D array of n_voxels x n_receptors
         receptor_features = get_voxel_receptor_values(receptor_volumes, vxl, output_dir)
 
         # Calculate voxel-wise correlation between receptor features
-        corr = np.corrcoef(receptor_features)
+        #corr = np.corrcoef(receptor_features)
+        from scipy.stats import spearmanr
+        corr = spearmanr(receptor_features, axis=1)[0]
         plt.cla(); plt.clf(); plt.close()
         plt.imshow(corr,cmap='nipy_spectral')
         plt.savefig(f'{output_dir}/correlation_matrix.png')
@@ -111,5 +113,5 @@ def volumetric_gradient_analysis(mask_file, receptor_volumes, output_dir, approa
         n_final = plot_explained_variance(gm, output_dir)
         print('Number of components:', n_final)
 
-        output_files = create_component_volumes(gm, vxl, mask_file, n_final, output_dir)
-    return output_files
+        create_component_volumes(gm, vxl, mask_file, n_final, output_filenames)
+    return output_filenames

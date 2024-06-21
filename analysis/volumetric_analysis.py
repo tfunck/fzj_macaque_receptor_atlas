@@ -21,7 +21,7 @@ from scipy.stats import spearmanr, pearsonr
 from volumetric.entropy_analysis import entropy_analaysis
 from volumetric.volumetric_ratio_analysis import ratio_analysis
 from volumetric.volumetric_gradient_analysis import volumetric_gradient_analysis
-from volumetric.surf_utils import preprocess_surface
+from volumetric.surf_utils import preprocess_surface, resample_label
 from surface_analysis import surface_analysis
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 import utils
@@ -254,7 +254,7 @@ def align(fixed_filename, moving_filename, moving_mask_filename, files_to_transf
     
     return output_files
 
-def apply_surface_atlas(surf_files, atlas_file, output_dir, descriptor):
+def apply_surface_atlas(surf_files, atlas_file, output_dir, descriptor, use_col=True):
     # load surface atlas
     atlas = nib.load(atlas_file).darrays[0].data
 
@@ -263,34 +263,42 @@ def apply_surface_atlas(surf_files, atlas_file, output_dir, descriptor):
     n=atlas.shape[0]
 
     for surf_file in surf_files:
+        print("Surf file:", surf_file)
         values = load_gifti(surf_file).reshape(-1,)
-        print('Mean:', np.mean(values), 'Values:', np.std(values) )
-        #n = np.bincount(atlas)
-        #totals = np.bincount(atlas, weights=surf)
-        #mean = totals / n
         print(atlas.shape, values.shape)
         
-        label= os.path.basename(surf_file).replace('.nii.gz','').replace('macaque_','').replace('.npy','')
-        row = pd.DataFrame({'receptor':[label]*n, 'label':atlas, 'density':values})
+        filename= os.path.basename(surf_file).replace('.nii.gz','').replace('macaque_','').replace('.npy','')
+        row = pd.DataFrame({'receptor':[filename]*n, 'label':atlas, 'density':values})
         df = pd.concat([df,row])
     
     # remove 0 labels
     df = df.loc[df['label'] > 0]
 
-    atlas_coding = { 6: 'visual', 	3: 'auditory', 2: 'somatosensory', 4: 'limbic', 5: 'dorsal attention', 1: 'default mode network'}
-    x_coding = { 6: 1, 	3: 2, 2: 3, 4: 4, 5: 5, 1: 6}
+    #atlas_coding = { 1: 'Visual', 2: 'Somatomotor', 3: 'Dorsal Attention', 4: 'Ventral Attention', 5:'Limbic', 6: 'Frontoparietal', 7: 'DMN'}
+    atlas_coding = { 1:'DMN', 2:'Somatomotor', 3:'Auditory', 4:'Limbic', 5:'DoralAtt', 6:'Visual', 7:'Insular-opercular'}
+    x_coding = { 6:1, 3:2, 2:3, 7:4, 4:5, 1:6, 5:7 }
     df['x'] = df['label'].map(x_coding)
     df['atlas'] = df['label'].map(atlas_coding)
+    print(df);
+    df.to_csv(f'{output_dir}/atlas_{descriptor}.csv', index=False) 
+    print(f'{output_dir}/atlas_{descriptor}.csv')
     #reindex 
     df = df.reset_index(drop=True)
+
+    # normalize 'density' values based on 'receptor' category
+    #df['density'] = (df['density'] - df.groupby('receptor')['density'].transform('mean')) / df.groupby('receptor')['density'].transform('std') 
+    df['density'] = df.groupby('receptor')['density'].transform(lambda x: (x - x.mean()) / x.std()) 
 
     plt.figure(figsize=(10,10))
     #sns.lineplot(x='atlas', y='density', hue='receptor', data=df)
     sns.color_palette("Set2")
-    g = sns.lineplot(data=df, x="x", y="density", hue="receptor", alpha=0.9)
-    g.set_xticks(range(1,7))
-    g.set_xticklabels(['visual', 'auditory', 'somatosensory', 'limbic', 'dorsal attention', 'default mode network'])
+    print(df['x'].unique())
+    g = sns.lineplot(data=df, x="x", y="density", hue="receptor" ) 
+    g.set_xticks(range(1,8))
+    #g.set_xticklabels(['Visual', 'Somatomotor', 'Dor. Att.', 'Ven. Att.', 'Limbic', 'Frontoparietal', 'DMN'])
+    g.set_xticklabels(['Visual', 'Auditory', 'Somatomotor', 'Limbic', 'Insular-opercular',  'DMN', 'DorsalAtt'])
     plt.savefig(f'{output_dir}/atlas_{descriptor}.png')
+    plt.clf(); plt.cla()
 
 wrk_dir='/home/thomas-funck/projects/fzj_macaque_receptor_atlas'
 if __name__ == '__main__' :
@@ -299,8 +307,8 @@ if __name__ == '__main__' :
     parser.add_argument('-l', dest='label_file', default='data/volumes/MEBRAINS_pseudo-segmentation-0_gm_left.nii.gz', type=str, help='Path to mask file')
     parser.add_argument('-e' , dest='mebrains_filename', default='data/volumes/MEBRAINS_T1_masked.nii.gz', type=str, help='Path to mask file')
     parser.add_argument('-y' , dest='yerkes_template_filename', default='data/volumes/MacaqueYerkes19_v1.2_AverageT1w_restore_masked.nii.gz', type=str, help='Path to mask file')
-    #parser.add_argument('-a' , dest='yerkes_atlas_filename', default='data/surfaces/L.BezginTo7Networks.32k_fs_LR.label.gii', type=str, help='Path to mask file')
-    parser.add_argument('-a' , dest='yerkes_atlas_filename', default='data/surfaces/R.Yeo2011_17Networks_N1000.human.10k_fs_LR.label.gii', type=str, help='Path to mask file')
+    parser.add_argument('-a' , dest='yerkes_atlas_filename', default='data/surfaces/L.BezginTo7Networks.32k_fs_LR.label.gii', type=str, help='Path to mask file')
+    #parser.add_argument('-a' , dest='yerkes_atlas_filename', default='data/surfaces/L.Yeo2011_7Networks_N1000.human-to-monkey.10k_fs_LR.label.gii', type=str, help='Path to mask file')
     parser.add_argument('-i', dest='input_dir', type=str, default='data/reconstruction/', help='Path to receptor volumes')
     parser.add_argument('-o', dest='output_dir', type=str, default=f'{wrk_dir}/outputs/volumetric', help='Path to output directory')
     parser.add_argument('-n', dest='n', default=10000, type=int, help='Number of random voxels to sample')
@@ -315,6 +323,7 @@ if __name__ == '__main__' :
     parser.add_argument('--y-mid-surf', dest='yerkes_mid_surf_filename', type=str, default=f'{wrk_dir}/data/surfaces/MacaqueYerkes19_v1.2.L.midthickness.32k_fs_LR.surf.gii', help='Path to Yerkes pial matter surface')
     parser.add_argument('--y-wm-surf', dest='yerkes_wm_surf_filename', type=str, default=f'{wrk_dir}/data/surfaces/MacaqueYerkes19.L.white.32k_fs_LR.surf.gii', help='Path to Yerkes pial matter surface')
     parser.add_argument('--y-sphere-surf', dest='yerkes_sphere_surf_filename', type=str, default=f'{wrk_dir}/data/surfaces/MacaqueYerkes19_v1.2.L.sphere.32k_fs_LR.surf.gii', help='Path to Yerkes pial matter surface')
+    parser.add_argument('--y-sphere-10k-surf', dest='yerkes_10k_sphere_surf_filename', type=str, default=f'{wrk_dir}/data/surfaces/MacaqueYerkes19.L.sphere.10k_fs_LR.surf.gii', help='Path to Yerkes pial matter surface')
     parser.add_argument('--y-sulc', dest='yerkes_sulc_filename', type=str, default=f'{wrk_dir}/data/surfaces/MacaqueYerkes19_v1.2.sulc.32k_fs_LR.dscalar.nii', help='Path to Yerkes pial matter surface')
     #parser.add_argument('--gm-infl', dest='infl_surf_filename', type=str, default='data/surfaces/MacaqueYerkes19.L.inflated.32k_fs_LR.surf.gii', help='Path to Yerkes pial matter surface')
     clobber=False
@@ -340,66 +349,70 @@ if __name__ == '__main__' :
     medial_wall_mask = load_gifti(medial_wall_mask_filename).astype(bool).reshape(-1,)
     receptor_volumes = glob.glob(f'{receptor_dir}/*nii.gz')
     hist_volumes = glob.glob(f'{hist_dir}/*nii.gz')
-
     ### Resize mask to receptor volume
     mask_rsl_file = resize_mask_to_receptor_volume(args.mask_file, receptor_volumes[0], args.output_dir)
-
-    if False :
-        yerkes_receptor_surfaces = preprocess_surface(
-            args.yerkes_wm_surf_filename,
-            args.yerkes_mid_surf_filename,
-            args.yerkes_gm_surf_filename, 
-            args.yerkes_sphere_surf_filename,
-            args.wm_surf_filename, 
-            args.mid_surf_filename,
-            args.gm_surf_filename,
-            args.sphere_surf_filename,
-            receptor_volumes,
-            align_dir
-            )
-        
-    receptor_volumes = align(args.yerkes_template_filename, args.mebrains_filename, mask_rsl_file, receptor_volumes, align_dir)
-
-    receptor_surfaces = project_to_surface( receptor_volumes, args.wm_surf_filename, args.gm_surf_filename, profiles_dir, agg_func=np.mean, clobber=False )
-
-    print('C')
-    apply_surface_atlas(yerkes_receptor_surfaces, args.yerkes_atlas_filename, args.output_dir, 'receptor')
-
-    #t1t2_analysis(mask_rsl_file, hist_volumes, t1t2_filename, args.output_dir)
-    ### Resize MEBRAINS T1/T2 to receptor volume
-    t1t2_rsl_filename = resize_mask_to_receptor_volume( t1t2_filename, receptor_volumes[0], args.output_dir, order=3)
+    args.n=15000 
+    gradient_volumes = volumetric_gradient_analysis(mask_rsl_file, receptor_volumes, grad_dir, approach='pca', n=args.n, clobber=False)
+    ### Calculate ratios between receptor volumes
+    #ratio_dict, [inh_list, exh_list, mod_list] = ratio_analysis(receptor_volumes, mask_rsl_file, ratio_dir, clobber=clobber )
+    #ratio_volumes = [fn for fn,lab in ratio_dict.items() if lab in ['Ex', 'Inh', 'Mod', 'GABAa/GABAb',  'Ex/Inh', '(Inh+Ex)/Mod']]
 
     ### Calculate entropy of receptor volumes
-    entropy_file, std_file = entropy_analaysis(mask_rsl_file, receptor_volumes, entropy_dir)
+    entropy_file, mean_file, std_file = entropy_analaysis(mask_rsl_file, receptor_volumes, entropy_dir, descriptor='all', clobber=True)
+    #inh_entropy_file, _, inh_std_file = entropy_analaysis(mask_rsl_file, inh_list, entropy_dir, descriptor='inh')
+    #exh_entropy_file, _,  exh_std_file = entropy_analaysis(mask_rsl_file, exh_list, entropy_dir, descriptor='exh')
+    #mod_entropy_file, _, mod_std_file = entropy_analaysis(mask_rsl_file, mod_list, entropy_dir, descriptor='mod')
+    #entropy_files = [entropy_file] #, inh_entropy_file, exh_entropy_file, mod_entropy_file]
 
-    yerkes_complexity_volumes = align(args.yerkes_template_filename, args.mebrains_filename, mask_rsl_file, [entropy_file, std_file], align_dir)
+    #volume_feature_dict = {
+    #    'receptor':receptor_volumes, 'gradient':gradient_volumes, 'ratio':ratio_volumes, 'mean':[mean_file], 'entropy':entropy_files, 'std':[std_file]
+    #    }
 
-    yerkes_complexity_surfaces = project_to_surface( yerkes_complexity_volumes,
-                                                     args.yerkes_wm_surf_filename, 
-                                                     args.yerkes_gm_surf_filename,
-                                                     yerkes_profiles_dir, 
-                                                     agg_func=np.mean,
-                                                     clobber=False 
-                                                     )
-
-    apply_surface_atlas(yerkes_complexity_surfaces, args.yerkes_atlas_filename, args.output_dir, 'complexity')
-
-
-    ### Calculate PCA gradients
-    #gradient_volumes = volumetric_gradient_analysis(mask_rsl_file, receptor_volumes, grad_dir, approach='pca', n=args.n)
-    #gradient_volumes = volumetric_gradient_analysis(mask_rsl_file, receptor_volumes, grad_dir, approach='le', n=args.n)
-    gradient_volumes = volumetric_gradient_analysis(mask_rsl_file, receptor_volumes, grad_dir, approach='dm', n=args.n)
-
-    ### Calculate ratios between receptor volumes
-    ratio_dict = ratio_analysis(receptor_volumes, mask_rsl_file, ratio_dir )
-    ratio_volumes = [fn for fn,lab in ratio_dict.items() if lab in ['Ex', 'Inh', 'Mod']]
-    #vif_analysis(ratio_volumes, mask_rsl_file, corr_dir)
-    #vif_analysis(gradient_volumes, mask_rsl_file, corr_dir)
-    vif_analysis(receptor_volumes, mask_rsl_file, corr_dir)
-    plot_pairwise_correlation(receptor_volumes, mask_rsl_file, corr_dir)
+    volume_feature_dict = {
+            'gradient':gradient_volumes,
+            'entropy':[entropy_file], 
+        }
+    yerkes_surface_feature_dict = preprocess_surface(
+        args.yerkes_wm_surf_filename,
+        args.yerkes_mid_surf_filename,
+        args.yerkes_gm_surf_filename, 
+        args.yerkes_sphere_surf_filename,
+        args.wm_surf_filename, 
+        args.mid_surf_filename,
+        args.gm_surf_filename,
+        args.sphere_surf_filename,
+        volume_feature_dict,
+        align_dir,
+        clobber=clobber
+        )
+    exit(0) 
+    yerkes_atlas_filename = args.yerkes_atlas_filename
+    #yerkes_atlas_filename = resample_label(
+    #    args.yerkes_atlas_filename,
+    #    args.yerkes_10k_sphere_surf_filename,
+    #    args.yerkes_sphere_surf_filename,
+    #    align_dir,
+    #    clobber=True
+    #)
+        
+    #Volumetric Alignment
+    #receptor_volumes = align(args.yerkes_template_filename, args.mebrains_filename, mask_rsl_file, receptor_volumes, align_dir)
+    #receptor_surfaces = project_to_surface( receptor_volumes, args.wm_surf_filename, args.gm_surf_filename, profiles_dir, agg_func=np.mean, clobber=False )
+    print(yerkes_atlas_filename)
+    apply_surface_atlas([yerkes_atlas_filename], yerkes_atlas_filename, args.output_dir, 'atlas')
+    
+    for descriptor, yerkes_feature_surfaces in yerkes_surface_feature_dict.items():
+        apply_surface_atlas(yerkes_feature_surfaces, yerkes_atlas_filename, args.output_dir, descriptor)
 
     exit(0)
     
+    #vif_analysis(receptor_volumes, mask_rsl_file, corr_dir)
+    #plot_pairwise_correlation(receptor_volumes, mask_rsl_file, corr_dir)
+    #complexity_volumes = align(args.yerkes_template_filename, args.mebrains_filename, mask_rsl_file, [entropy_file, std_file], align_dir)
+
+    #t1t2_analysis(mask_rsl_file, hist_volumes, t1t2_filename, args.output_dir)
+    ### Resize MEBRAINS T1/T2 to receptor volume
+    #t1t2_rsl_filename = resize_mask_to_receptor_volume( t1t2_filename, receptor_volumes[0], args.output_dir, order=3)
 
     # Plot entropy on surface
     project_and_plot_surf(
@@ -423,13 +436,11 @@ if __name__ == '__main__' :
         #cmap='nipy_spectral',
         clobber=True
         )
-    exit(0)
-
     #receptor_volumes = [ args.label_file ]
     ### Calculate surface differential gradients
     surface_analysis(receptor_volumes, args.wm_surf_filename, args.gm_surf_filename, profiles_dir, args.output_dir)
                      
-    exit(0)
+    #apply_surface_atlas(yerkes_receptor_surfaces, args.yerkes_atlas_filename, args.output_dir, 'receptor')
     #comparison_volumes = [gradient_volumes, [ str(i) for i, fn in enumerate(gradient_volumes)] ]
     #comparison_volumes[0] += ratios[0]
     #comparison_volumes[1] += ratios[1]
