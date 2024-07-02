@@ -28,6 +28,9 @@ from surface_analysis import surface_analysis
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 import utils
 
+global ligand_receptor_dict
+ligand_receptor_dict={'ampa':'AMPA', 'kain':'Kainate', 'mk80':'NMDA', 'ly34':'mGluR2/3', 'flum':'GABA$_A$ Benz.', 'cgp5':'GABA$_B$', 'musc':'GABA$_A$ Agonist', 'sr95':'GABA$_A$ Antagonist', 'pire':r'Muscarinic M$_1$', 'afdx':r'Muscarinic M$_2$ (antagonist)','damp':r'Muscarinic M$_3$','epib':r'Nicotinic $\alpha_4\beta_2$','oxot':r'Muscarinic M$_2$ (oxot)', 'praz':r'$\alpha_1$','uk14':r'$\alpha_2$ (agonist)','rx82':r'$\alpha_2$ (antagonist)', 'dpat':r'5-HT$_{1A}$','keta':r'5HT$_2$', 'sch2':r"D$_1$", 'dpmg':'Adenosine 1', 'cellbody':'Cell Body', 'myelin':'Myelin'}
+
 
 def resize_mask_to_receptor_volume(mask_file, receptor_file, output_dir, order=0):
     """Resize mask to the same dimensions as the receptor volume."""
@@ -297,7 +300,7 @@ def align(
         reg.outputs = reg._list_outputs()
 
     for output_filename, filename in zip(output_files, files_to_transform):
-        if not os.path.exists(output_filename) or clobber  or True:
+        if not os.path.exists(output_filename) or clobber :
             print('Test')
             print(filename)
             print(fwd_filename)
@@ -362,7 +365,101 @@ def apply_surface_atlas(surf_files, atlas_file, output_dir, descriptor, use_col=
     plt.savefig(f'{output_dir}/atlas_{descriptor}.png')
     plt.clf(); plt.cla()
 
-wrk_dir='/home/thomas-funck/projects/fzj_macaque_receptor_atlas'
+
+def calculate_receptor_similarity(receptor_filenames, mask_file, output_dir, clobber=False):
+    """Calculate elastic-net linear regression between receptor volumes."""
+    mask = nib.load(mask_file).get_fdata().astype(bool)
+    # calculate linear regression between receptor volumes with leave-one-out
+
+    csv_fn = f'{output_dir}/receptor_similarity.csv'
+
+    if not os.path.exists(csv_fn) or clobber :
+        n = len(receptor_filenames)
+        receptor_volumes = []
+        receptor_abs_volumes = []
+
+        for i, receptor_file in enumerate(receptor_filenames):
+            print(receptor_file)
+            receptor = nib.load(receptor_file).get_fdata()
+            receptor = receptor[mask]
+
+            receptor_abs_volumes.append(receptor)
+            # z score receptor
+            receptor_volumes.append( (receptor - np.mean(receptor)) / np.std(receptor))
+        
+        receptor_volumes = np.array(receptor_volumes)
+
+        receptors = [ ligand_receptor_dict[ os.path.basename(fn).replace('macaque_','').replace('.nii.gz','') ] for fn in receptor_filenames]
+        print(receptors)
+        receptor_scores = np.zeros(n)
+
+        df = pd.DataFrame({})
+        for receptor, i in zip(receptors, range(n)):
+            if 'Adenosine' in receptor :
+                continue
+
+            x0, x1 = np.percentile(receptor_abs_volumes[i], [1, 99])
+            ratio = x1/x0
+
+            X = np.delete(receptor_volumes, i, axis=0)
+            temp_receptors = np.delete(receptors, i)
+            y = receptor_volumes[i]
+            # fit elastic net
+            from sklearn.linear_model import ElasticNetCV
+            model = ElasticNetCV(cv=5,  max_iter=10000)
+            model.fit(X.T,y)
+            #print(model.coef_)
+            #print(model.intercept_)
+            #print(model.alpha_)
+            #print(model.l1_ratio_)
+            coefs = model.coef_
+            r2 = model.score(X.T,y)
+            print(r2)
+            receptor_scores[i] = r2
+            df= pd.concat([
+                df,
+                pd.DataFrame(
+                    {'receptor':receptor, 'r2':r2, 'regressors':temp_receptors, 'coefs':coefs, 'Ratio':ratio}
+                    )
+                ]
+                , ignore_index=True)
+            #print(model.predict(X))
+
+        print(df)
+        #sort by r2
+        df = df.sort_values(by='r2', ascending=False)
+        df.to_csv(csv_fn, index=False)
+    
+    df = pd.read_csv(csv_fn)
+
+    # set figure size
+    plt.figure(figsize=(15,15))
+    sns.catplot(data=df, x='receptor', y='r2', kind='point')
+    plt.xticks(rotation=90)
+    plt.tight_layout()
+    plt.xlabel('Neurotransmitter Receptors')
+    plt.ylabel(r'$r^2$')
+    plt.savefig(f'{output_dir}/receptor_dependence.png', dpi=300)
+    print(f'{output_dir}/receptor_dependence.png')
+
+    plt.figure(figsize=(15,10))
+    sns.catplot(data=df, x='regressors', y='coefs', kind='point', col='receptor', col_wrap=3, sharey=False)
+    plt.xticks(rotation=90)
+    plt.tight_layout()
+    plt.savefig(f'{output_dir}/receptor_dependence_coefs.png')
+
+    df = df.sort_values(by='Ratio', ascending=False) 
+    plt.figure(figsize=(15,15))
+    sns.catplot(data=df, x='receptor', y='Ratio', kind='point')
+    plt.xticks(rotation=90)
+    plt.tight_layout()
+    plt.xlabel('Neurotransmitter Receptors')
+    plt.ylabel('Ratio')
+    plt.savefig(f'{output_dir}/receptor_ratios.png', dpi=300)
+    print(f'{output_dir}/receptor_ratios.png')
+
+
+wrk_dir = '/home/tfunck/projects/fzj_macaque_receptor_atlas/' # os.path.dirname(os.path.realpath(__file__))
 if __name__ == '__main__' :
     parser = argparse.ArgumentParser(description='Volumetric Gradient Analysis')
     parser.add_argument('-m', dest='mask_file', default='data/volumes/MEBRAINS_segmentation_NEW_gm_left.nii.gz', type=str, help='Path to mask file')
@@ -411,16 +508,19 @@ if __name__ == '__main__' :
     medial_wall_mask = load_gifti(medial_wall_mask_filename).astype(bool).reshape(-1,)
     receptor_volumes = glob.glob(f'{receptor_dir}/*nii.gz')
     hist_volumes = glob.glob(f'{hist_dir}/*nii.gz')
+
     ### Resize mask to receptor volume
     mask_rsl_file = resize_mask_to_receptor_volume(args.mask_file, receptor_volumes[0], args.output_dir)
-    args.n=15000 
-    gradient_volumes = volumetric_gradient_analysis(mask_rsl_file, receptor_volumes, grad_dir, approach='pca', n=args.n, clobber=False)
+
+    calculate_receptor_similarity(receptor_volumes, mask_rsl_file, args.output_dir, clobber=True)
+    args.n=20000 
+    gradient_volumes = volumetric_gradient_analysis(mask_rsl_file, receptor_volumes, grad_dir, approach='pca', n=args.n, clobber=clobber)
     ### Calculate ratios between receptor volumes
     #ratio_dict, [inh_list, exh_list, mod_list] = ratio_analysis(receptor_volumes, mask_rsl_file, ratio_dir, clobber=clobber )
     #ratio_volumes = [fn for fn,lab in ratio_dict.items() if lab in ['Ex', 'Inh', 'Mod', 'GABAa/GABAb',  'Ex/Inh', '(Inh+Ex)/Mod']]
 
     ### Calculate entropy of receptor volumes
-    entropy_file, mean_file, std_file = entropy_analaysis(mask_rsl_file, receptor_volumes, entropy_dir, descriptor='all', clobber=True)
+    entropy_file, mean_file, std_file = entropy_analaysis(mask_rsl_file, receptor_volumes, entropy_dir, descriptor='all', clobber=clobber)
     #inh_entropy_file, _, inh_std_file = entropy_analaysis(mask_rsl_file, inh_list, entropy_dir, descriptor='inh')
     #exh_entropy_file, _,  exh_std_file = entropy_analaysis(mask_rsl_file, exh_list, entropy_dir, descriptor='exh')
     #mod_entropy_file, _, mod_std_file = entropy_analaysis(mask_rsl_file, mod_list, entropy_dir, descriptor='mod')

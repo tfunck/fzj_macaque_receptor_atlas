@@ -97,11 +97,11 @@ def volumetric_gradient_analysis(mask_file, receptor_volumes, output_dir, approa
         receptor_features = get_voxel_receptor_values(receptor_volumes, vxl, output_dir)
 
         # Calculate voxel-wise correlation between receptor features
-        #corr = np.corrcoef(receptor_features)
-        from scipy.stats import spearmanr
-        corr = spearmanr(receptor_features, axis=1)[0]
+        corr = np.corrcoef(receptor_features)
+        #from scipy.stats import spearmanr
+        #corr = spearmanr(receptor_features, axis=1)[0]
         plt.cla(); plt.clf(); plt.close()
-        plt.imshow(corr,cmap='nipy_spectral')
+        plt.imshow(corr,cmap='RdBu_r')
         plt.savefig(f'{output_dir}/correlation_matrix.png')
 
         # Calculate receptor gradients
