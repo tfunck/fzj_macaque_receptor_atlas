@@ -4,11 +4,11 @@ import numpy as np
 import nibabel as nib
 import shutil
 
-
+from brainbuilder.interp.surfinterp import interpolate_over_surface
 from matplotlib_surface_plotting import plot_surf
 from nibabel.freesurfer import read_morph_data, read_geometry
-import brainbuilder.utils.mesh_utils as mesh_utils 
-
+import brainbuilder.utils.mesh_utils as mesh_utils
+from brainbuilder.utils.mesh_utils import load_mesh_ext
 
 def msm_align(
         fixed_sphere, 
@@ -275,6 +275,42 @@ def write_gifti(array, filename, intent='NIFTI_INTENT_SHAPE'):
 def load_gifti(filename):
     return nib.load(filename).darrays[0].data
 
+def interpolate_gradient_over_surface(
+        decimated_surface_val:np.ndarray,
+        surface_file:str,
+        sphere_file:str,
+        output_dir:str,
+        component:int,
+        valid_idx:np.ndarray,
+        clobber:bool=False):
+    '''
+    Interpolate gradient over surface. The gradient is calculated based on a decimated surface
+    and needs to be interpolated to the original surface
+    :param grad: gradient (n_layers, n_points, n_components)
+    :param surface_file: surface file name
+    :param sphere_file: sphere file name
+    :param clobber: clobber existing output file
+    :return: np.ndarray
+    '''
+    # Load surface
+    coords, faces = load_mesh_ext(surface_file)
+
+    # Interpolate gradient over surface
+    grad_surf_fn = f'{output_dir}/grad_surf_{component}.npy'
+
+    if not os.path.exists(grad_surf_fn) or clobber:
+        surface_val = np.zeros(coords.shape[0])
+        surface_val[valid_idx] = decimated_surface_val
+        interp_surface_mask = np.zeros(coords.shape[0]).astype(bool)
+        interp_surface_mask[valid_idx] = 1
+        surface_val = interpolate_over_surface(sphere_file, surface_val, order=1, surface_mask=interp_surface_mask)
+
+        np.save(grad_surf_fn, surface_val)
+    else :
+        surface_val = np.load(grad_surf_fn)
+        
+    return surface_val
+
 def project_to_surface(
         receptor_volumes, 
         wm_surf_filename, 
@@ -296,9 +332,8 @@ def project_to_surface(
         bound1 = n
 
     for receptor_volume in receptor_volumes:
-        profile_fn = f"{output_dir}/{os.path.basename(receptor_volume).replace('.nii.gz','')}.gii"
+        profile_fn = f"{output_dir}/{os.path.basename(receptor_volume).replace('.nii.gz','')}.func.gii"
         profile_list.append(profile_fn)
-
 
         if not os.path.exists(profile_fn) or clobber :
             receptor_img = nib.load(receptor_volume)
@@ -338,6 +373,7 @@ def project_to_surface(
 
             # save profiles as func.gii with nibabel
             write_gifti(profiles, profile_fn)
+            print(wm_surf_filename, profile_fn)
 
             nib.Nifti1Image(nvol_out, receptor_img.affine).to_filename(f"{output_dir}/n_vol.nii.gz")
     return profile_list
@@ -422,7 +458,7 @@ def plot_receptor_surf(
         pvals[medial_wall_mask] = np.nan
 
     #vmin, vmax = np.nanmax(receptor)*threshold[0], np.nanmax(receptor)*threshold[1]
-    vmin, vmax = np.percentile(receptor, threshold)
+    vmin, vmax = np.percentile(receptor[~np.isnan(receptor)], threshold)
     print('real threshold', threshold)
     print(f'\tWriting {filename}')
     plot_surf(  coords, 
@@ -524,12 +560,16 @@ def preprocess_surface(
 
         for surface_filename in moving_feature_surfaces : 
             surf_label = os.path.basename(surface_filename).replace('.func.gii','')
+
+            cmap = 'RdBu_r'
+
             if 'entropy' in surf_label:
                 threshold=[10,98]
             else :
                 threshold=[2,98]
-            print('THRESHOLD', threshold)
-            plot_receptor_surf([surface_filename], moving_mid_cortex, output_dir, label=f'{surf_label}_mv',  cmap='nipy_spectral', threshold=threshold)
+            print(moving_mid_cortex)
+            print(surface_filename)
+            plot_receptor_surf([surface_filename], moving_mid_cortex, output_dir, label=f'{surf_label}_mv',  cmap=cmap, threshold=threshold)
 
         warped_feature_surfaces[label] = msm_resample_list(warped_sphere, fixed_sphere, moving_feature_surfaces, output_dir)
 
@@ -540,7 +580,6 @@ def preprocess_surface(
             else :
                 threshold=[2,98]
             surf_label = os.path.basename(surface_filename).replace('.func.gii','')
-            plot_receptor_surf([surface_filename], fixed_mid_cortex, output_dir, label=f'{surf_label}_warp',  cmap='nipy_spectral', threshold=threshold)
-    exit(0)
+            plot_receptor_surf([surface_filename], fixed_mid_cortex, output_dir, label=f'{surf_label}_warp',  cmap=cmap, threshold=threshold)
     return warped_feature_surfaces
 

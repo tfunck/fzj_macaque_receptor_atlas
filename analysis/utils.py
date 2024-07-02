@@ -52,3 +52,21 @@ def get_volume_from_list(input_list, target_string, zscore=True):
 
     return vol
 
+
+def get_voxel_receptor_values(receptor_volumes, vxl, output_dir):
+    """Get receptor values for each voxel."""
+    nvox = len(vxl[0])
+
+    receptor_features = np.zeros((nvox, len(receptor_volumes)))
+
+    for i, receptor in enumerate(receptor_volumes):
+        receptor_vol = nib.load(receptor)
+        receptor_data = receptor_vol.get_fdata()
+
+        #z score receptor data
+        receptor_data = (receptor_data - receptor_data.mean()) / receptor_data.std()
+
+        receptor_features[:, i] = receptor_data[vxl]
+
+    return receptor_features
+

@@ -89,7 +89,7 @@ def volumetric_gradient_analysis(mask_file, receptor_volumes, output_dir, approa
     
     output_filenames = [  f'{output_dir}/macaque_gradient_{i}.nii.gz' for i in range(3)]
     run_grad_analysis =  False in [os.path.exists(file) for file in output_filenames]
-    print('n=',n)
+    
     if run_grad_analysis or clobber :
         vxl = get_random_voxels(mask_file, n=n)
 
