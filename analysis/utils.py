@@ -4,15 +4,14 @@ import numpy as np
 import nibabel as nib
 from kneed import KneeLocator
 
+global ligand_receptor_dict
+ligand_receptor_dict={'ampa':'AMPA', 'kain':'Kainate', 'mk80':'NMDA', 'ly34':'mGluR2/3', 'flum':'GABA$_A$ Benz.', 'cgp5':'GABA$_B$', 'musc':'GABA$_A$ Agonist', 'sr95':'GABA$_A$ Antagonist', 'pire':r'Muscarinic M$_1$', 'afdx':r'Muscarinic M$_2$ (antagonist)','damp':r'Muscarinic M$_3$','epib':r'Nicotinic $\alpha_4\beta_2$','oxot':r'Muscarinic M$_2$ (oxot)', 'praz':r'$\alpha_1$','uk14':r'$\alpha_2$ (agonist)','rx82':r'$\alpha_2$ (antagonist)', 'dpat':r'5-HT$_{1A}$','keta':r'5HT$_2$', 'sch2':r"D$_1$", 'dpmg':'Adenosine 1', 'cellbody':'Cell Body', 'myelin':'Myelin'}
+
 
 
 def plot_explained_variance(gm, output_dir, threshold=0.95):
     lambdas = gm.lambdas_
 
-
-
-
-    
     x = np.arange(len(lambdas))
     kneedle = KneeLocator(x, lambdas, S=1.0, curve="convex", direction="decreasing")
 

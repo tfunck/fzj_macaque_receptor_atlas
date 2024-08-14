@@ -433,7 +433,8 @@ def plot_receptor_surf(
         threshold=[2,98],
         label='', 
         cmap='RdBu_r',
-        scale=None
+        scale=None,
+        clobber=False
         ):
     """Plot receptor profiles on the cortical surface"""
     os.makedirs(output_dir, exist_ok=True)
@@ -459,19 +460,18 @@ def plot_receptor_surf(
 
     #vmin, vmax = np.nanmax(receptor)*threshold[0], np.nanmax(receptor)*threshold[1]
     vmin, vmax = np.percentile(receptor[~np.isnan(receptor)], threshold)
-    print('real threshold', threshold)
-    print(f'\tWriting {filename}')
-    plot_surf(  coords, 
-                faces, 
-                receptor, 
-                rotate=[90, 270], 
-                filename=filename,
-                pvals=pvals,
-                vmin=vmin,
-                vmax=vmax,
-                cmap=cmap,
-                cmap_label=label
-                ) 
+    if not os.path.exists(filename) or clobber:
+        plot_surf(  coords, 
+                    faces, 
+                    receptor, 
+                    rotate=[90, 270], 
+                    filename=filename,
+                    pvals=pvals,
+                    vmin=vmin,
+                    vmax=vmax,
+                    cmap=cmap,
+                    cmap_label=label
+                    ) 
 
     if ndepths > 3 :
         bins = np.rint(np.linspace(0, ndepths,4)).astype(int)
@@ -481,8 +481,9 @@ def plot_receptor_surf(
             vmin, vmax = np.nanmax(receptor)*threshold[0], np.nanmax(receptor)*threshold[1]
 
             filename = f"{output_dir}/surf_profiles_{label}_layer-{i/ndepths}.png" 
-            
-            plot_surf(  coords, 
+
+            if not os.path.exists(filename)  or clobber :
+                plot_surf(  coords, 
                         faces, 
                         receptor, 
                         rotate=[90, 270], 
@@ -521,12 +522,12 @@ def preprocess_surface(
 
     # Quality control for surface alignment
     for label, metric in fixed_metrics_dict.items():
-        plot_receptor_surf([metric], fixed_mid_cortex, output_dir,  label='fx_'+label, cmap='nipy_spectral')
+        plot_receptor_surf([metric], fixed_mid_cortex, output_dir,  label='fx_'+label, cmap='nipy_spectral',clobber=clobber)
     
     for label, metric in moving_metrics_dict.items():
-        plot_receptor_surf([metric], moving_mid_cortex, output_dir,  label='mv_'+label, cmap='nipy_spectral')
+        plot_receptor_surf([metric], moving_mid_cortex, output_dir,  label='mv_'+label, cmap='nipy_spectral',clobber=clobber)
     
-    warped_sphere, warped_data, metrics_rsl_list = msm_align(
+    warped_sphere, _, metrics_rsl_list = msm_align(
         fixed_sphere, 
         fixed_metrics, 
         moving_sphere, 
@@ -538,8 +539,6 @@ def preprocess_surface(
     for i, metric in enumerate(metrics_rsl_list):
         plot_receptor_surf([metric], fixed_mid_cortex, output_dir, label=f'warped_fx_{i}',  cmap='nipy_spectral')
 
-    clobber=True
-    
     warped_feature_surfaces = {}
     for  label, volumes in volume_feature_dict.items():
         zscore=True
@@ -581,5 +580,6 @@ def preprocess_surface(
                 threshold=[2,98]
             surf_label = os.path.basename(surface_filename).replace('.func.gii','')
             plot_receptor_surf([surface_filename], fixed_mid_cortex, output_dir, label=f'{surf_label}_warp',  cmap=cmap, threshold=threshold)
+
     return warped_feature_surfaces
 

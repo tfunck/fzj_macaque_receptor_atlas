@@ -6,7 +6,7 @@ import utils
 from scipy.ndimage import gaussian_filter
 
 
-def sum_volumes(volume_list, mask_vol, zscore=True, gauss_sd=0):
+def sum_volumes(volume_list, mask_vol, zscore=False, gauss_sd=0):
     n=0
     idx = mask_vol > 0
     for i, ligand in enumerate(volume_list):
@@ -29,11 +29,12 @@ def sum_volumes(volume_list, mask_vol, zscore=True, gauss_sd=0):
 
 
 
-def create_volume(receptor_files, target_strings, output_filename, clobber=False):
+def create_volume(receptor_files, mask_file, target_strings, output_filename, clobber=False):
 
     file_list = utils.get_files_from_list( receptor_files, target_strings) 
     
     if not os.path.exists(output_filename) or clobber:
+        mask_vol = nib.load(mask_file).get_fdata()
         
         ref_img = nib.load(file_list[0])
 
@@ -88,9 +89,9 @@ def ratio_analysis(receptor_files, mask_file, output_dir, clobber=False):
     output_dict = dict(zip(output_volumes, cmap_label_list))
 
 
-    inh_vol, inh_list = create_volume(receptor_files, ['musc', 'cgp5', 'flum'], inh_filename, clobber=clobber)
-    exh_vol, exh_list = create_volume(receptor_files, ['ampa', 'kain', 'mk80'], exh_filename, clobber=clobber)
-    mod_vol, mod_list = create_volume(receptor_files, ['dpat', 'uk14', 'oxot', 'keta', 'sch2', 'pire'], mod_filename, clobber=clobber)
+    inh_vol, inh_list = create_volume(receptor_files, mask_file, ['musc', 'cgp5', 'flum'], inh_filename, clobber=clobber)
+    exh_vol, exh_list = create_volume(receptor_files, mask_file, ['ampa', 'kain', 'mk80'], exh_filename, clobber=clobber)
+    mod_vol, mod_list = create_volume(receptor_files, mask_file, ['dpat', 'uk14', 'oxot', 'keta', 'sch2', 'pire'], mod_filename, clobber=clobber)
 
     if False in [os.path.exists(file) for file in output_volumes]:
 

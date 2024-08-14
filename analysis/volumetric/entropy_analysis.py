@@ -3,7 +3,11 @@ import numpy as np
 import nibabel as nib
 import matplotlib.pyplot as plt
 import seaborn as sns
+import pandas as pd
+import json
 from volumetric.surf_utils import project_to_surface, project_and_plot_surf, load_gifti, write_gifti, plot_receptor_surf
+
+from utils import ligand_receptor_dict
 
 def read_valid_voxels(receptor_filename, mask_vol):
     """Read valid voxels from a receptor volume"""
@@ -43,17 +47,15 @@ def calc_volume_probabilities(volume_data, nbins):
     return voxels_prob
 
 
-def write_prob_volume(voxels_prob, valid_idx, output_dir, volume_file):
+def write_prob_volume(voxels_prob, valid_idx, output_dir, volume_file, prob_filename):
     prob_volume = np.zeros(nib.load(volume_file).shape).astype(np.float32)
     affine = nib.load(volume_file).affine
 
     prob_volume[valid_idx] = voxels_prob
-    prob_filename = f'{output_dir}/{os.path.basename(volume_file).replace(".nii.gz", "_prob.nii.gz")}'
 
     print('Write:',prob_filename)
     nib.Nifti1Image(prob_volume, affine).to_filename(prob_filename)
 
-    return prob_filename
 
 def plot_entropy_figure(entropy, prob_filename_list, output_dir):
     """Use matplotlib display the entropy and probability distributions. 
@@ -119,17 +121,17 @@ def calculate_probability_volumes(volumes, mask_file, output_dir, nbins=64, clob
     prob_filename_list = [ f'{output_dir}/{os.path.basename(volume_file).replace(".nii.gz", "_prob.nii.gz")}' for volume_file in volumes ]
     
     # iterate over the receptor volumes
-    for i, (prob_file, volume_file) in enumerate(zip(prob_filename_list, volumes)):
+    for i, (prob_filename, volume_file) in enumerate(zip(prob_filename_list, volumes)):
 
         volume = nib.load(volume_file)
         volume_data = volume.get_fdata()
         volume_data = volume_data[valid_idx]
 
         # calculate the probability of each voxel intensity
-        if not os.path.exists(prob_file) or clobber :
+        if not os.path.exists(prob_filename) or clobber :
             voxels_prob = calc_volume_probabilities(volume_data, nbins).astype(np.float16) 
             assert np.sum(voxels_prob == 0 ) == 0 
-            prob_filename = write_prob_volume(voxels_prob, valid_idx, output_dir, volume_file) 
+            write_prob_volume(voxels_prob, valid_idx, output_dir, volume_file, prob_filename) 
 
     return prob_filename_list
 
@@ -157,53 +159,123 @@ def entropy_analysis(
 
     prob_npy_filename =  f'{output_dir}/prob_features.npy'
 
-    prob_volume_list = calculate_probability_volumes(volumes, mask_file, output_dir, nbins=nbins, clobber=clobber)
-    exit(0)
+    prob_volume_list = calculate_probability_volumes(
+        volumes, 
+        mask_file, 
+        output_dir, 
+        nbins=nbins, 
+        clobber=clobber
+        )
 
-    prob_files = project_to_surface( prob_volume_list, wm_surf_filename, gm_surf_filename, output_dir, n=nlayers, zscore=False, clobber=False)
+    prob_surf_files = project_to_surface( 
+        prob_volume_list, 
+        wm_surf_filename, 
+        gm_surf_filename, 
+        output_dir, 
+        n=nlayers, 
+        zscore=False, 
+        clobber=clobber
+        )
     
     if not os.path.exists(prob_npy_filename) or clobber :
-        prob = np.array([ np.array(nib.load(file).darrays[0].data) for file in prob_files ])
+        prob = np.array([ np.array(nib.load(file).darrays[0].data) for file in prob_surf_files ])
         np.save(prob_npy_filename, prob)
     else :
         prob = np.load(prob_npy_filename)
     # prob = receptor x vertex x depth
-    
     for i, j in subsets :
         s0 = int(np.rint(100*i/nlayers))
         s1 = int(np.rint(100*(j-1)/nlayers))
 
         entropy_filename = os.path.join(output_dir, f'entropy_{s0}-{s1}%.func.gii')
         total_entropy_filename = f'{output_dir}/total_entropy_{s0}-{s1}%.npy'
-        print(entropy_filename)
 
         entropy_surf_filenames.append(entropy_filename)
-        total_entropy_filenames.append(total_entropy_filenames)
 
-        if not os.path.exists(entropy_filename) or clobber or True: 
+        if not os.path.exists(entropy_filename) or clobber: 
             # calculate the entropy of the voxels across the receptor volumes
             print('subset', i, j, prob.shape)
             prob_sub = prob[:,:,i:j]
             assert np.sum(np.isnan(prob_sub) + np.isinf(prob_sub)) == 0
 
-            entropy = np.max(prob_sub,axis=(0,2))
             entropy = -np.sum(prob_sub * np.log2(prob_sub), axis=(0,2))
             #entropy /= np.log2(prob.shape[0])
-            #entropy = np.sum(prob_sub, axis=(0,2))
 
             entropy[medial_wall_mask] = np.nan
 
             write_gifti(entropy, entropy_filename)    
             plot_receptor_surf([entropy_filename], wm_surf_filename, output_dir, label=f'entropy_{s0}-{s1}%', cmap='RdBu_r', threshold=[2,98])
   
-        if not os.path.exists(total_entropy_filename) or clobber or True :
+        if not os.path.exists(total_entropy_filename) or clobber:
             entropy = nib.load(entropy_filename).darrays[0].data
+
             total_entropy = -np.sum(prob * np.log2(prob)) / np.log2(prob.shape[1])
             np.save(total_entropy_filename, total_entropy)
         else :
-            total_entropy = np.load(total_entropy_filename)[0]
-    exit(0)   
-    return entropy_surf_filenames, total_entropy_filenames
+            total_entropy = np.load(total_entropy_filename)
+            print('Total Entropy:', total_entropy)
 
+    return entropy_surf_filenames, prob_volume_list
 
+def get_total_entropy(
+        mask_file, 
+        medial_wall_mask, 
+        volumes, 
+        wm_surf_filename, 
+        gm_surf_filename, 
+        subsets, 
+        output_dir,
+        clobber=False
+        ):
 
+    total_entropy_json = f'{output_dir}/total_entropy.json'
+
+    if not os.path.exists(total_entropy_json) or clobber:
+        total_entropy_dict = {}
+        for receptor_volume in volumes:
+            ligand = os.path.basename(receptor_volume).replace('macaque_','').replace('.nii.gz','')
+            receptor = ligand_receptor_dict[ligand]
+            _, prob_volume_list = entropy_analysis(
+                mask_file, 
+                medial_wall_mask, 
+                [receptor_volume], 
+                wm_surf_filename, 
+                gm_surf_filename, 
+                subsets, 
+                output_dir, 
+                clobber=clobber
+            )
+            prob_volume = nib.load(prob_volume_list[0]).get_fdata()
+            idx = prob_volume > 0
+            prob_volume = prob_volume[idx]
+            total_entropy_dict[receptor] = -np.sum(prob_volume * np.log2(prob_volume)) / np.log2(prob_volume.shape[1])   
+
+        json.dump(total_entropy_dict, open(total_entropy_json, 'w'))
+    else :
+        total_entropy_dict = json.load(open(total_entropy_json, 'r'))
+
+    plot_total_entropy(total_entropy_dict, output_dir, clobber=clobber)
+
+def plot_total_entropy(total_entropy_json, output_dir, clobber=False):
+
+    entropy_png = f'{output_dir}/receptor_entropy.png'
+    total_entropy_dict = json.load(open(total_entropy_json, 'r'))
+
+    if not os.path.exists(entropy_png) or clobber :
+        df = pd.DataFrame({})
+        for receptor, total_entropy in total_entropy_dict.items():
+            if 'dpmg' in receptor_filename:
+                continue
+            ligand = os.path.basename(receptor_filename).replace('macaque_','').replace('.nii.gz','')
+            receptor = ligand_receptor_dict[ligand]
+            print(receptor, total_entropy)
+            df = pd.concat([df, pd.DataFrame({'receptor':[receptor], 'entropy':[total_entropy]})])
+
+        df.sort_values('entropy', inplace=True)
+        plt.figure(figsize=(7,5))
+        sns.catplot(x='receptor', y='entropy', kind='point', data=df)
+        plt.xticks(rotation=90)
+        plt.xlabel('Neurotransmitter Receptor')
+        plt.ylabel('Cortical Entropy')
+        plt.tight_layout()
+        plt.savefig(entropy_png, dpi=300)

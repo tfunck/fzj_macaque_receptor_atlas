@@ -20,21 +20,19 @@ from matplotlib_surface_plotting import plot_surf
 from skimage.transform import resize
 from scipy.stats import spearmanr, pearsonr
 from volumetric.surf_pca import surf_pca 
+from volumetric.cca_analysis import cca_analysis
+from volumetric.reg_analysis import reg_analysis, get_uncorrelated_receptors
 
+from brainbuilder.utils.mesh_utils import load_mesh_ext
 from volumetric.entropy_analysis import entropy_analysis
 from volumetric.volumetric_ratio_analysis import ratio_analysis
 from volumetric.volumetric_gradient_analysis import volumetric_gradient_analysis
 from volumetric.surf_utils import preprocess_surface, resample_label, plot_receptor_surf
 from surface_analysis import surface_analysis
 from statsmodels.stats.outliers_influence import variance_inflation_factor
+from utils import ligand_receptor_dict
+from scipy.ndimage import center_of_mass
 import utils
-
-global ligand_receptor_dict
-ligand_receptor_dict={'ampa':'AMPA', 'kain':'Kainate', 'mk80':'NMDA', 'ly34':'mGluR2/3', 'flum':'GABA$_A$ Benz.', 'cgp5':'GABA$_B$', 'musc':'GABA$_A$ Agonist', 'sr95':'GABA$_A$ Antagonist', 'pire':r'Muscarinic M$_1$', 'afdx':r'Muscarinic M$_2$ (antagonist)','damp':r'Muscarinic M$_3$','epib':r'Nicotinic $\alpha_4\beta_2$','oxot':r'Muscarinic M$_2$ (oxot)', 'praz':r'$\alpha_1$','uk14':r'$\alpha_2$ (agonist)','rx82':r'$\alpha_2$ (antagonist)', 'dpat':r'5-HT$_{1A}$','keta':r'5HT$_2$', 'sch2':r"D$_1$", 'dpmg':'Adenosine 1', 'cellbody':'Cell Body', 'myelin':'Myelin'}
-
-
-global ligand_receptor_dict
-ligand_receptor_dict={'ampa':'AMPA', 'kain':'Kainate', 'mk80':'NMDA', 'ly34':'mGluR2/3', 'flum':'GABA$_A$ Benz.', 'cgp5':'GABA$_B$', 'musc':'GABA$_A$ Agonist', 'sr95':'GABA$_A$ Antagonist', 'pire':r'Muscarinic M$_1$', 'afdx':r'Muscarinic M$_2$ (antagonist)','damp':r'Muscarinic M$_3$','epib':r'Nicotinic $\alpha_4\beta_2$','oxot':r'Muscarinic M$_2$ (oxot)', 'praz':r'$\alpha_1$','uk14':r'$\alpha_2$ (agonist)','rx82':r'$\alpha_2$ (antagonist)', 'dpat':r'5-HT$_{1A}$','keta':r'5HT$_2$', 'sch2':r"D$_1$", 'dpmg':'Adenosine 1', 'cellbody':'Cell Body', 'myelin':'Myelin'}
 
 def imshow_volumes(volumes, mask_filename, template_filename, output_dir):
     
@@ -43,7 +41,6 @@ def imshow_volumes(volumes, mask_filename, template_filename, output_dir):
 
     mask = nib.load(mask_filename).get_fdata()
     template = nib.load(template_filename).get_fdata()
-    from scipy.ndimage import center_of_mass
     fig = plt.figure(figsize=(m1*10,m0*10))
     fig.patch.set_facecolor('black')
     #set background to black
@@ -77,9 +74,6 @@ def imshow_volumes(volumes, mask_filename, template_filename, output_dir):
     fig.tight_layout() 
     
     plt.savefig(f'{output_dir}/volumes.png', dpi=400)
-
-global ligand_receptor_dict
-ligand_receptor_dict={'ampa':'AMPA', 'kain':'Kainate', 'mk80':'NMDA', 'ly34':'mGluR2/3', 'flum':'GABA$_A$ Benz.', 'cgp5':'GABA$_B$', 'musc':'GABA$_A$ Agonist', 'sr95':'GABA$_A$ Antagonist', 'pire':r'Muscarinic M$_1$', 'afdx':r'Muscarinic M$_2$ (antagonist)','damp':r'Muscarinic M$_3$','epib':r'Nicotinic $\alpha_4\beta_2$','oxot':r'Muscarinic M$_2$ (oxot)', 'praz':r'$\alpha_1$','uk14':r'$\alpha_2$ (agonist)','rx82':r'$\alpha_2$ (antagonist)', 'dpat':r'5-HT$_{1A}$','keta':r'5HT$_2$', 'sch2':r"D$_1$", 'dpmg':'Adenosine 1', 'cellbody':'Cell Body', 'myelin':'Myelin'}
 
 def imshow_volumes(volumes, mask_filename, template_filename, output_dir):
     
@@ -409,11 +403,9 @@ def align(
 
     return output_files
 
-def apply_surface_atlas(surf_files, atlas_file, output_dir, descriptor, use_col=True):
+def apply_surface_atlas(surf_files, atlas_file):
     # load surface atlas
     atlas = nib.load(atlas_file).darrays[0].data
-
-    atlas_name = os.path.basename(atlas_file).split('_')[0]
 
     df = pd.DataFrame({})
 
@@ -431,6 +423,11 @@ def apply_surface_atlas(surf_files, atlas_file, output_dir, descriptor, use_col=
     # remove 0 labels
     df = df.loc[df['label'] > 0]
 
+    return df
+
+
+def apply_bezgin_atlas(surf_files, atlas_file, output_dir, descriptor, use_col=True):
+    df = apply_surface_atlas(surf_files, atlas_file, output_dir, descriptor, use_col)
     #atlas_coding = { 1: 'Visual', 2: 'Somatomotor', 3: 'Dorsal Attention', 4: 'Ventral Attention', 5:'Limbic', 6: 'Frontoparietal', 7: 'DMN'}
     atlas_coding = { 1:'DMN', 2:'Somatomotor', 3:'Auditory', 4:'Limbic', 5:'DoralAtt', 6:'Visual', 7:'Insular-opercular'}
     x_coding = { 6:1, 3:2, 2:3,  4:4, 7:5, 5:6, 1:7 }
@@ -455,6 +452,7 @@ def apply_surface_atlas(surf_files, atlas_file, output_dir, descriptor, use_col=
     g.set_xticklabels(['Visual', 'Auditory', 'Somatomotor', 'Limbic', 'Insular-opercular',  'DMN', 'DorsalAtt'])
     plt.savefig(f'{output_dir}/atlas_{descriptor}.png')
     plt.clf(); plt.cla()
+
 
 
 def calculate_receptor_similarity(receptor_filenames, mask_file, output_dir, clobber=False):
@@ -499,10 +497,7 @@ def calculate_receptor_similarity(receptor_filenames, mask_file, output_dir, clo
             from sklearn.linear_model import ElasticNetCV
             model = ElasticNetCV(cv=5,  max_iter=10000)
             model.fit(X.T,y)
-            #print(model.coef_)
-            #print(model.intercept_)
-            #print(model.alpha_)
-            #print(model.l1_ratio_)
+
             coefs = model.coef_
             r2 = model.score(X.T,y)
             print(r2)
@@ -549,6 +544,112 @@ def calculate_receptor_similarity(receptor_filenames, mask_file, output_dir, clo
     plt.savefig(f'{output_dir}/receptor_ratios.png', dpi=300)
     print(f'{output_dir}/receptor_ratios.png')
 
+def get_surf_label_averages(
+        mask_filename:str, annotation_filename:str, surf_filename:str, output_func_filename:str, output_csv_filename:str, annot_name:str=None, clobber:bool=False
+        ):
+    """Calculate the average receptor density for each label in the surface mask."""
+    atlas = nib.load(mask_filename).darrays[0].data
+    annot = nib.load(annotation_filename).darrays[0].data
+    labels = np.unique(atlas)
+    labels = labels[labels > 0]
+
+    if not os.path.exists(output_func_filename) or not os.path.exists(output_csv_filename) or clobber:
+        avg = np.zeros_like(annot)
+        df = pd.DataFrame({})
+        df_list = []
+
+        if annot_name is None:
+            annot_name = os.path.basename(annotation_filename).replace('.func.gii','')
+        print(2, annot_name)
+        for label in labels:
+
+            idx = (atlas == label) # & mask
+            roi_mean = np.mean(annot[idx])
+            avg[idx] = roi_mean
+            
+            row = pd.DataFrame({'label':[label], 'avg':[roi_mean], 'annot':[annot_name] })
+            
+            df_list.append(row)
+
+        df = pd.concat(df_list)
+
+        df.to_csv(output_csv_filename, index=False)
+
+        # write to gifti
+        write_gifti(avg, output_func_filename) 
+
+        # plot surface for quality control
+        coords, faces = load_mesh_ext(surf_filename)
+
+        qc_filename = output_func_filename.replace('.func.gii','.png')
+        print('hello')
+        print(qc_filename)
+        plot_surf(  
+                coords, 
+                faces, 
+                avg, 
+                rotate=[90, 270], 
+                filename=qc_filename,
+                pvals=np.ones(avg.shape),
+                vmin=np.min(avg),
+                vmax=np.max(avg),
+                cmap='RdBu_r',
+                cmap_label=label
+                ) 
+
+        print('\t', output_func_filename)
+    else :
+        df = pd.read_csv(output_csv_filename)
+
+    return df
+
+def get_surf_label_averages_for_files(
+        mask_file:str, surf_filename:str, annotations:list, output_dir:str, annotation_names:list=None, clobber:bool=False
+        ):
+    os.makedirs(output_dir, exist_ok=True)
+
+    df_list = []
+    for i, annotation in enumerate(annotations) :
+        if annotation_names is not None:
+            annot_name = annotation_names[i]
+
+        # define func.gii output filename
+        output_func_filename = f'{output_dir}/{os.path.basename(annotation).replace(".func.gii","_avg.func.gii")}'
+        output_csv_filename = f'{output_dir}/{os.path.basename(annotation).replace(".func.gii","_avg.csv")}'
+        print(1, annot_name)
+        df_list.append( 
+            get_surf_label_averages(
+                mask_file, annotation, surf_filename, output_func_filename, output_csv_filename, annot_name=annot_name, clobber=clobber
+                )
+            )
+
+    df = pd.concat(df_list)
+    df = df.pivot(index='label', columns='annot', values='avg')
+
+    return df
+
+def create_receptor_family_df(
+        markov_receptor_df:pd.DataFrame
+):
+
+    def get_receptor_family(X, family, receptor_names):
+        receptor_names = [ name for name in receptor_names if name in X.columns ]
+        return pd.DataFrame({family:X[receptor_names].mean(axis=1)} )
+
+    receptor_family_dict = { 'Glutamate':['ampa','kain','mk80'], 
+                            'GABA':['flum','cgp5','musc','sr95'], 
+                             'Cholinergic':['pire','afdx','damp','epib','oxot'],
+                             'Adrenergic':['praz','uk14','rx82'],
+                             'Serotonergic':['dpat'], #,'keta'],
+                             }
+    receptor_family_list = []                        
+    for family, receptor_names in receptor_family_dict.items():
+        receptor_family_list.append(
+            get_receptor_family(markov_receptor_df, family, receptor_names)
+            )
+    markov_receptor_family_df = pd.concat(receptor_family_list, axis=1)
+
+    return markov_receptor_family_df
 
 wrk_dir = '/home/tfunck/projects/fzj_macaque_receptor_atlas/' # os.path.dirname(os.path.realpath(__file__))
 if __name__ == '__main__' :
@@ -579,6 +680,14 @@ if __name__ == '__main__' :
     clobber=False
 
     args = parser.parse_args()
+    args.markov_atlas_filename = f'{wrk_dir}/data/surfaces/L.MarkovCC12_M132_91-area.32k_fs_LR.label.gii'
+    args.yerkes_wm_32k_surf_filename = f'{wrk_dir}/data/surfaces/MacaqueYerkes19.L.white.32k_fs_LR.surf.gii'
+    args.markov_dev_thickness = f'{wrk_dir}/data/annot/func.gifti.markov/Thickness.lh.func.gii'
+    args.markov_dev_volume = f'{wrk_dir}/data/annot/func.gifti.markov/Volume.lh.func.gii'
+    args.markov_dev_area = f'{wrk_dir}/data/annot/func.gifti.markov/Area.lh.func.gii'
+
+    markov_dev_files = [args.markov_dev_thickness, args.markov_dev_volume, args.markov_dev_area]
+
     t1t2_filename = 'data/volumes/MEBRAINS_T1T2_masked.nii.gz'
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -613,66 +722,55 @@ if __name__ == '__main__' :
     offset = 1
 
     sublayers = np.rint(np.linspace(offset, nlayers-offset, subdivisions+1))
-    print(sublayers)
-    subsets = np.array([(offset,nlayers-offset)] + [ (i,j) for i,j in zip(sublayers[0:-1],sublayers[1:]) ]).astype(int)
-    print(subsets); 
-    # 0, 2, 4, 6
-    receptor_surfaces = project_to_surface( receptor_volumes, args.wm_surf_filename, args.gm_surf_filename, profiles_dir, n=nlayers, clobber=False )
+    subsets = ((4,7),)
+    receptor_surfaces = project_to_surface( receptor_volumes, args.wm_surf_filename, args.gm_surf_filename, profiles_dir, n=nlayers, clobber=clobber )
+
     # TODO: do on cortex subdivisions
-    surf_pca(receptor_surfaces, medial_wall_mask, args.wm_surf_filename, args.sphere_surf_filename, grad_dir, n=5000, clobber=True)
-    exit(0)
+    pca_surfaces = surf_pca(receptor_surfaces, medial_wall_mask, args.wm_surf_filename, args.sphere_surf_filename, grad_dir, n=10000, clobber=clobber)
 
-    entropy_analysis(mask_rsl_file, medial_wall_mask, receptor_volumes, args.wm_surf_filename, args.gm_surf_filename, subsets, entropy_dir, nlayers=nlayers, clobber=True)
-    exit(0)
-
-    args.n=15000 
-    gradient_volumes = volumetric_gradient_analysis(mask_rsl_file, receptor_volumes, grad_dir, approach='pca', n=args.n, clobber=clobber)
+    entropy_surf_files, _ = entropy_analysis(
+        mask_rsl_file, 
+        medial_wall_mask, 
+        receptor_volumes, 
+        args.wm_surf_filename, 
+        args.gm_surf_filename, 
+        subsets, 
+        entropy_dir, 
+        nlayers=nlayers, 
+        clobber=clobber
+        )
+    
     ### Calculate ratios between receptor volumes
     ratio_dict, [inh_list, exh_list, mod_list] = ratio_analysis(receptor_volumes, mask_rsl_file, ratio_dir, clobber=clobber )
     #ratio_volumes = [fn for fn,lab in ratio_dict.items() if lab in ['Ex', 'Inh', 'Mod', 'GABAa/GABAb',  'Ex/Inh', '(Inh+Ex)/Mod']]
     ratio_volumes = [fn for fn,lab in ratio_dict.items() if lab in [  'Ex/Inh', '(Inh+Ex)/Mod']]
 
-    ### Calculate entropy of receptor volumes
-    entropy_file, mean_file, std_file, _ = entropy_analysis(mask_rsl_file, receptor_volumes, entropy_dir, descriptor='all', clobber=clobber)
-    df = pd.DataFrame({})
-    for receptor_filename in receptor_volumes:
-        if 'dpmg' in receptor_filename:
-            continue
-        ligand = os.path.basename(receptor_filename).replace('macaque_','').replace('.nii.gz','')
-        receptor = ligand_receptor_dict[ligand]
-        _, _, _, total_entropy = entropy_analysis( mask_rsl_file, [receptor_filename], entropy_dir, descriptor=receptor, clobber=True)
-        print(receptor, total_entropy)
-        df = pd.concat([df, pd.DataFrame({'receptor':[receptor], 'entropy':[total_entropy]})])
+    ratio_surfaces = project_to_surface( 
+        ratio_volumes, args.wm_surf_filename, args.gm_surf_filename, profiles_dir, bound0=4, bound1=7, agg_func=np.mean, n=nlayers, clobber=clobber 
+        )
 
-    df.sort_values('entropy', inplace=True)
-    plt.figure(figsize=(7,5))
-    sns.catplot(x='receptor', y='entropy', kind='point', data=df)
-    plt.xticks(rotation=90)
-    plt.xlabel('Neurotransmitter Receptor')
-    plt.ylabel('Cortical Entropy')
-    plt.tight_layout()
-    plt.savefig(f'{entropy_dir}/receptor_entropy.png', dpi=300)
-    exit(0)
-
-    #inh_entropy_file, _, inh_std_file = entropy_analaysis(mask_rsl_file, inh_list, entropy_dir, descriptor='inh')
-    #exh_entropy_file, _,  exh_std_file = entropy_analaysis(mask_rsl_file, exh_list, entropy_dir, descriptor='exh')
-    #mod_entropy_file, _, mod_std_file = entropy_analaysis(mask_rsl_file, mod_list, entropy_dir, descriptor='mod')
-    #entropy_files = [entropy_file] #, inh_entropy_file, exh_entropy_file, mod_entropy_file]
-
-    #volume_feature_dict = {
-    #    'receptor':receptor_volumes, 'gradient':gradient_volumes, 'ratio':ratio_volumes, 'mean':[mean_file], 'entropy':entropy_files, 'std':[std_file]
-    #    }
-
-    yerkes_atlas_filename = args.yerkes_atlas_filename
-    plot_receptor_surf([yerkes_atlas_filename], args.yerkes_mid_surf_filename, args.output_dir, label=f'atlas',  cmap='nipy_spectral', threshold=[0,100])
-
+    '''
+    os.makedirs(corr_dir, exist_ok=True)
+    plt.close(); plt.cla(); plt.clf()
+    r1 = nib.load(ratio_surfaces[0]).darrays[0].data
+    r2 = nib.load(ratio_surfaces[1]).darrays[0].data
+    pca1 = nib.load(pca_surfaces[0]).darrays[0].data
+    e = nib.load(entropy_surf_files[0]).darrays[0].data
+    idx = ~np.isnan(r1) & ~np.isnan(r2) & ~np.isnan(pca1) & ~np.isnan(e)
+    r1 = r1[idx]
+    r2 = r2[idx]
+    pca1 = pca1[idx]
+    e = e[idx]
+    '''
     volume_feature_dict = {
-            'gradient':gradient_volumes,
-            'entropy':[entropy_file],
+            #'gradient':gradient_volumes,
+            #'entropy':[entropy_file],
             'ratio': ratio_volumes, 
-            'std':[std_file],
-            'mean':[mean_file],
+            #'std':[std_file],
+            #'mean':[mean_file],
+            'receptors':receptor_volumes
         }
+
     yerkes_surface_feature_dict = preprocess_surface(
         args.yerkes_wm_surf_filename,
         args.yerkes_mid_surf_filename,
@@ -686,6 +784,35 @@ if __name__ == '__main__' :
         align_dir,
         clobber=clobber
         )
+
+    receptor_surfaces = yerkes_surface_feature_dict['receptors']
+    ligand_names = [ os.path.basename(fn).replace('macaque_','').replace('.nii.gz','') for fn in receptor_volumes]
+    receptor_names = [ ligand_receptor_dict[ligand] for ligand in ligand_names ]
+
+    # Calculate Markov Atlas averages
+    markov_receptor_df = get_surf_label_averages_for_files(
+        args.markov_atlas_filename, args.yerkes_wm_32k_surf_filename, receptor_surfaces, args.output_dir+'/atlas/', annotation_names=receptor_names, clobber=clobber
+        )
+
+    markov_dev_df = get_surf_label_averages_for_files(
+        args.markov_atlas_filename, args.yerkes_wm_32k_surf_filename, markov_dev_files, args.output_dir+'/atlas/', annotation_names=['Thickness', 'Volume', 'Area'], clobber=clobber
+    )
+    
+    # Canonical Correlation Analysis
+    receptor_weights = cca_analysis(markov_receptor_df, markov_dev_df, args.output_dir+'/cca/')
+
+    markov_receptor_df = get_uncorrelated_receptors(receptor_weights, markov_receptor_df)
+
+    # Calculate Markov Atlas averages
+    #markov_ligand_df = get_surf_label_averages_for_files(
+    #    args.markov_atlas_filename, args.yerkes_wm_32k_surf_filename, receptor_surfaces, args.output_dir+'/atlas/', annotation_names=ligand_names, clobber=clobber
+    #    )
+    #markov_receptor_df = create_receptor_family_df(markov_ligand_df) 
+
+    reg_analysis(markov_receptor_df, markov_dev_df, args.output_dir+'/regression/')
+
+    exit(0) 
+
     #yerkes_atlas_filename = resample_label(
     #    args.yerkes_atlas_filename,
     #    args.yerkes_10k_sphere_surf_filename,
@@ -694,22 +821,15 @@ if __name__ == '__main__' :
     #    clobber=True
     #)
         
-    #Volumetric Alignment
+    # Volumetric Alignment
     #receptor_volumes = align(args.yerkes_template_filename, args.mebrains_filename, mask_rsl_file, receptor_volumes, align_dir)
     #receptor_surfaces = project_to_surface( receptor_volumes, args.wm_surf_filename, args.gm_surf_filename, profiles_dir, agg_func=np.mean, clobber=False )
     
     for descriptor, yerkes_feature_surfaces in yerkes_surface_feature_dict.items():
         apply_surface_atlas(yerkes_feature_surfaces, yerkes_atlas_filename, args.output_dir, descriptor)
-
-    exit(0)
     
     #vif_analysis(receptor_volumes, mask_rsl_file, corr_dir)
     #plot_pairwise_correlation(receptor_volumes, mask_rsl_file, corr_dir)
-    #complexity_volumes = align(args.yerkes_template_filename, args.mebrains_filename, mask_rsl_file, [entropy_file, std_file], align_dir)
-
-    #t1t2_analysis(mask_rsl_file, hist_volumes, t1t2_filename, args.output_dir)
-    ### Resize MEBRAINS T1/T2 to receptor volume
-    #t1t2_rsl_filename = resize_mask_to_receptor_volume( t1t2_filename, receptor_volumes[0], args.output_dir, order=3)
 
     # Plot entropy on surface
 
@@ -745,70 +865,4 @@ if __name__ == '__main__' :
     #comparison_volumes[1] += ratios[1]
     #comparison_volumes[0].append( entropy)
     #comparison_volumes[1].append('entropy')
-    t1t2_tp = (t1t2_rsl_filename,  't1t2')
-    entropy_tp = (entropy, 'entropy')
-    comparison_volumes = [[t1t2_tp, entropy_tp],]
-    
-    [entropy, t1t2_rsl_filename] = project_to_surface(
-                                        [entropy, t1t2_rsl_filename], 
-                                        args.wm_surf_filename, 
-                                        args.gm_surf_filename, 
-                                        profiles_dir
-                                    )
-        
-    x = np.load(entropy)[:,2:-2]
-    y = np.load(t1t2_rsl_filename)[:,2:-2]
-    x = np.mean(x, axis=1)
-    y = np.mean(y, axis=1)
-    print(pearsonr(x,y) )
-    from sklearn.linear_model import LinearRegression
-    model = LinearRegression()
-    model.fit(x.reshape(-1,1), y)
-    # get model residuals
-    residuals = np.abs(y - model.predict(x.reshape(-1,1)))
-
-    plt.scatter(x,y,alpha=0.02)
-    plt.savefig(f'{corr_dir}/entropy_vs_t1t2_surf.png')
-
-    #coords_l, faces_l = mesh_utils.load_mesh_ext(args.infl_surf_filename)
-    coords_l, faces_l = mesh_utils.load_mesh_ext(args.gm_surf_filename)
-
-    plot_surf( coords_l, 
-                faces_l, 
-                x, 
-                rotate=[90, 270], 
-                filename=f'{corr_dir}/entropy_surf.png',
-                vmax = np.max(x), #np.percentile(y, 99.5), 
-                vmin = np.min(x), # np.percentile(y, 0.5), 
-                pvals=np.ones_like(x),
-                cmap='nipy_spectral',
-                cmap_label='Entropy'
-                )
-
-    plot_surf( coords_l, 
-                faces_l, 
-                y, 
-                rotate=[90, 270], 
-                filename=f'{corr_dir}/t1t2_surf.png',
-                #vmax = np.percentile(x, 98), 
-                #vmin = np.percentile(x, 2), 
-                pvals=np.ones_like(x),
-                cmap='nipy_spectral',
-                cmap_label='T1/T2'
-                )
-
-
-    plot_surf( coords_l, 
-                faces_l, 
-                residuals, 
-                rotate=[90, 270], 
-                filename=f'{corr_dir}/entropy_vs_t1t2_surf_residuals.png',
-                #vmax = np.percentile(residuals, 98), 
-                #vmin = np.percentile(residuals, 2), 
-                pvals=np.ones_like(residuals),
-                cmap='nipy_spectral',
-                cmap_label='|Residuals|'
-                )
-
-
     
