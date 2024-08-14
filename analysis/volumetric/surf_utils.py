@@ -581,6 +581,7 @@ def preprocess_surface(
     for i, metric in enumerate(metrics_rsl_list):
         plot_receptor_surf([metric], fixed_mid_cortex, output_dir, label=f'warped_fx_{i}',  cmap='nipy_spectral')
 
+
     warped_feature_surfaces = {}
     for  label, volumes in volume_feature_dict.items():
         zscore=True

@@ -3,7 +3,11 @@ import numpy as np
 import nibabel as nib
 import matplotlib.pyplot as plt
 import seaborn as sns
+import pandas as pd
+import json
 from volumetric.surf_utils import project_to_surface, project_and_plot_surf, load_gifti, write_gifti, plot_receptor_surf
+
+from utils import ligand_receptor_dict
 
 def read_valid_voxels(receptor_filename, mask_vol):
     """Read valid voxels from a receptor volume"""
@@ -21,8 +25,8 @@ def calc_volume_probabilities(volume_data, nbins):
     # e.g., volume_data = [.1, .1, .5]
     print('Calculating probabilities with bins:', nbins, '...')
     counts, bins = np.histogram(volume_data, bins=nbins)
-    print(len(counts))
-    
+
+
     # assign the voxel into bins based on their intensities
     # e.g., voxel_bins = [1, 1, 2]
     voxel_bins = np.digitize(volume_data, bins[1:])
@@ -43,17 +47,15 @@ def calc_volume_probabilities(volume_data, nbins):
     return voxels_prob
 
 
-def write_prob_volume(voxels_prob, valid_idx, output_dir, volume_file):
+def write_prob_volume(voxels_prob, valid_idx, output_dir, volume_file, prob_filename):
     prob_volume = np.zeros(nib.load(volume_file).shape).astype(np.float32)
     affine = nib.load(volume_file).affine
 
     prob_volume[valid_idx] = voxels_prob
-    prob_filename = f'{output_dir}/{os.path.basename(volume_file).replace(".nii.gz", "_prob.nii.gz")}'
 
     print('Write:',prob_filename)
     nib.Nifti1Image(prob_volume, affine).to_filename(prob_filename)
 
-    return prob_filename
 
 def plot_entropy_figure(entropy, prob_filename_list, output_dir):
     """Use matplotlib display the entropy and probability distributions. 
@@ -119,17 +121,17 @@ def calculate_probability_volumes(volumes, mask_file, output_dir, nbins=64, clob
     prob_filename_list = [ f'{output_dir}/{os.path.basename(volume_file).replace(".nii.gz", "_prob.nii.gz")}' for volume_file in volumes ]
     
     # iterate over the receptor volumes
-    for i, (prob_file, volume_file) in enumerate(zip(prob_filename_list, volumes)):
+    for i, (prob_filename, volume_file) in enumerate(zip(prob_filename_list, volumes)):
 
         volume = nib.load(volume_file)
         volume_data = volume.get_fdata()
         volume_data = volume_data[valid_idx]
 
         # calculate the probability of each voxel intensity
-        if not os.path.exists(prob_file) or clobber :
+        if not os.path.exists(prob_filename) or clobber :
             voxels_prob = calc_volume_probabilities(volume_data, nbins).astype(np.float16) 
             assert np.sum(voxels_prob == 0 ) == 0 
-            prob_filename = write_prob_volume(voxels_prob, valid_idx, output_dir, volume_file) 
+            write_prob_volume(voxels_prob, valid_idx, output_dir, volume_file, prob_filename) 
 
     return prob_filename_list
 
@@ -157,47 +159,56 @@ def entropy_analysis(
 
     prob_npy_filename =  f'{output_dir}/prob_features.npy'
 
-    prob_volume_list = calculate_probability_volumes(volumes, mask_file, output_dir, nbins=nbins, clobber=clobber)
-    exit(0)
+    prob_volume_list = calculate_probability_volumes(
+        volumes, 
+        mask_file, 
+        output_dir, 
+        nbins=nbins, 
+        clobber=clobber
+        )
 
-    prob_files = project_to_surface( prob_volume_list, wm_surf_filename, gm_surf_filename, output_dir, n=nlayers, zscore=False, clobber=False)
+    prob_surf_files = project_to_surface( 
+        prob_volume_list, 
+        wm_surf_filename, 
+        gm_surf_filename, 
+        output_dir, 
+        n=nlayers, 
+        zscore=False, 
+        clobber=clobber
+        )
     
     if not os.path.exists(prob_npy_filename) or clobber :
-        prob = np.array([ np.array(nib.load(file).darrays[0].data) for file in prob_files ])
+        prob = np.array([ np.array(nib.load(file).darrays[0].data) for file in prob_surf_files ])
         np.save(prob_npy_filename, prob)
     else :
         prob = np.load(prob_npy_filename)
     # prob = receptor x vertex x depth
-    
     for i, j in subsets :
         s0 = int(np.rint(100*i/nlayers))
         s1 = int(np.rint(100*(j-1)/nlayers))
 
         entropy_filename = os.path.join(output_dir, f'entropy_{s0}-{s1}%.func.gii')
         total_entropy_filename = f'{output_dir}/total_entropy_{s0}-{s1}%.npy'
-        print(entropy_filename)
 
         entropy_surf_filenames.append(entropy_filename)
-        total_entropy_filenames.append(total_entropy_filenames)
 
-        if not os.path.exists(entropy_filename) or clobber or True: 
+        if not os.path.exists(entropy_filename) or clobber: 
             # calculate the entropy of the voxels across the receptor volumes
             print('subset', i, j, prob.shape)
             prob_sub = prob[:,:,i:j]
             assert np.sum(np.isnan(prob_sub) + np.isinf(prob_sub)) == 0
 
-            entropy = np.max(prob_sub,axis=(0,2))
             entropy = -np.sum(prob_sub * np.log2(prob_sub), axis=(0,2))
             #entropy /= np.log2(prob.shape[0])
-            #entropy = np.sum(prob_sub, axis=(0,2))
 
             entropy[medial_wall_mask] = np.nan
 
             write_gifti(entropy, entropy_filename)    
             plot_receptor_surf([entropy_filename], wm_surf_filename, output_dir, label=f'entropy_{s0}-{s1}%', cmap='RdBu_r', threshold=[2,98])
   
-        if not os.path.exists(total_entropy_filename) or clobber or True :
+        if not os.path.exists(total_entropy_filename) or clobber:
             entropy = nib.load(entropy_filename).darrays[0].data
+
             total_entropy = -np.sum(prob * np.log2(prob)) / np.log2(prob.shape[1])
             np.save(total_entropy_filename, total_entropy)
         else :

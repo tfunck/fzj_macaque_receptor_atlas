@@ -33,6 +33,8 @@ def pairwise_distance_correlation(samples):
     def row_correlation( i, samples):
         n_samples = len(samples)
         row = np.zeros(n_samples)
+        if i % 100 == 0 : 
+            print('Completed:', 100*i/n_samples,end='\r')
 
         for j in range(i, n_samples):
             if i == j:
@@ -79,10 +81,13 @@ def save_partial_vector(vector, medial_wall_mask, idx, surface_filename, sphere_
     comp_filename = f'{output_dir}/surf_{label}.gii'
     write_gifti(full_comp, comp_filename)    
 
-    plot_receptor_surf([comp_filename], surface_filename, output_dir, label=f'{label}',  cmap=cmap, threshold=[0,100])
+    if not os.path.exists(comp_filename) or clobber:
+        plot_receptor_surf([comp_filename], surface_filename, output_dir, label=f'{label}',  cmap=cmap, threshold=[0,100])
+    
+    return comp_filename
 
 def surf_pca(
-        features_files, medial_wall_mask, surface_filename, sphere_filename, output_dir, n=10000, clobber=True
+        features_files, medial_wall_mask, surface_filename, sphere_filename, output_dir, n=10000, clobber=False
         ):
     os.makedirs(output_dir, exist_ok=True)
     # Load features into numpy array from list of gifti files
@@ -140,19 +145,22 @@ def surf_pca(
 
     print('Componenets')
     print(pca_components.shape)
+    component_list = []
     for i in range(pca_components.shape[1]):
-        save_partial_vector(
-                pca_components[:,i], medial_wall_mask, idx, surface_filename, sphere_filename, output_dir, f'PC{i+1}', clobber=False
+        comp_filename = save_partial_vector(
+                pca_components[:,i], medial_wall_mask, idx, surface_filename, sphere_filename, output_dir, f'PC{i+1}', clobber=clobber
                 )
-    features = features.reshape(features.shape[0],-1)
-    for eps in np.arange(2,20,2) :
-        labels = cluster.KMeans(eps).fit(features).labels_
-        
-        save_partial_vector(
-                labels, medial_wall_mask, idx, surface_filename, sphere_filename, output_dir, f'seg_eps-{eps}', cmap='nipy_spectral', clobber=True
-                )
+        component_list.append(comp_filename)
 
-    return corr
+    #features = features.reshape(features.shape[0],-1)
+    #for eps in np.arange(2,20,2) :
+    #    labels = cluster.KMeans(eps).fit(features).labels_
+    #    
+    #    save_partial_vector(
+    #            labels, medial_wall_mask, idx, surface_filename, sphere_filename, output_dir, f'seg_eps-{eps}', cmap='nipy_spectral', clobber=True
+    #            )
+
+    return component_list
 
      
 
