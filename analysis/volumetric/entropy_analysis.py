@@ -202,7 +202,7 @@ def entropy_analysis(
             np.save(total_entropy_filename, total_entropy)
         else :
             total_entropy = np.load(total_entropy_filename)[0]
-    exit(0)   
+     
     return entropy_surf_filenames, total_entropy_filenames
 
 

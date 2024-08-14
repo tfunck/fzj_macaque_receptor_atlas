@@ -22,6 +22,7 @@ from volumetric.surf_pca import surf_pca
 from volumetric.entropy_analysis import entropy_analysis
 from volumetric.volumetric_ratio_analysis import ratio_analysis
 from volumetric.volumetric_gradient_analysis import volumetric_gradient_analysis
+from volumetric.cell_type_analysis import cell_type_analysis
 from volumetric.surf_utils import preprocess_surface, resample_label, plot_receptor_surf
 from surface_analysis import surface_analysis
 from statsmodels.stats.outliers_influence import variance_inflation_factor
@@ -402,73 +403,56 @@ if __name__ == '__main__' :
 
     mebrains_rsl = resize_mask_to_receptor_volume( args.mebrains_filename, receptor_volumes[0], args.output_dir, order=3)
 
-    #imshow_volumes(receptor_volumes, mask_rsl_file, mebrains_rsl, args.output_dir )
     nlayers=10
-    subdivisions=3
-    offset = 1
-
-    sublayers = np.rint(np.linspace(offset, nlayers-offset, subdivisions+1))
-    print(sublayers)
-    subsets = np.array([(offset,nlayers-offset)] + [ (i,j) for i,j in zip(sublayers[0:-1],sublayers[1:]) ]).astype(int)
-    print(subsets); 
-    # 0, 2, 4, 6
+    
     receptor_surfaces = project_to_surface( receptor_volumes, args.wm_surf_filename, args.gm_surf_filename, profiles_dir, n=nlayers, clobber=False )
     # TODO: do on cortex subdivisions
-    surf_pca(receptor_surfaces, medial_wall_mask, args.wm_surf_filename, args.sphere_surf_filename, grad_dir, n=5000, clobber=True)
-    exit(0)
 
-    entropy_analysis(mask_rsl_file, medial_wall_mask, receptor_volumes, args.wm_surf_filename, args.gm_surf_filename, subsets, entropy_dir, nlayers=nlayers, clobber=True)
-    exit(0)
 
-    args.n=15000 
-    gradient_volumes = volumetric_gradient_analysis(mask_rsl_file, receptor_volumes, grad_dir, approach='pca', n=args.n, clobber=clobber)
-    ### Calculate ratios between receptor volumes
-    ratio_dict, [inh_list, exh_list, mod_list] = ratio_analysis(receptor_volumes, mask_rsl_file, ratio_dir, clobber=clobber )
-    #ratio_volumes = [fn for fn,lab in ratio_dict.items() if lab in ['Ex', 'Inh', 'Mod', 'GABAa/GABAb',  'Ex/Inh', '(Inh+Ex)/Mod']]
-    ratio_volumes = [fn for fn,lab in ratio_dict.items() if lab in [  'Ex/Inh', '(Inh+Ex)/Mod']]
+    run_entropy = False
+    run_gradient = False
+    run_ratio = False
+    run_atlas_analysis = False
+    run_cell_analysis = True
+    viz_receptors = False
 
-    ### Calculate entropy of receptor volumes
-    entropy_file, mean_file, std_file, _ = entropy_analysis(mask_rsl_file, receptor_volumes, entropy_dir, descriptor='all', clobber=clobber)
-    df = pd.DataFrame({})
-    for receptor_filename in receptor_volumes:
-        if 'dpmg' in receptor_filename:
-            continue
-        ligand = os.path.basename(receptor_filename).replace('macaque_','').replace('.nii.gz','')
-        receptor = ligand_receptor_dict[ligand]
-        _, _, _, total_entropy = entropy_analysis( mask_rsl_file, [receptor_filename], entropy_dir, descriptor=receptor, clobber=True)
-        print(receptor, total_entropy)
-        df = pd.concat([df, pd.DataFrame({'receptor':[receptor], 'entropy':[total_entropy]})])
+    volume_feature_dict = {}
 
-    df.sort_values('entropy', inplace=True)
-    plt.figure(figsize=(7,5))
-    sns.catplot(x='receptor', y='entropy', kind='point', data=df)
-    plt.xticks(rotation=90)
-    plt.xlabel('Neurotransmitter Receptor')
-    plt.ylabel('Cortical Entropy')
-    plt.tight_layout()
-    plt.savefig(f'{entropy_dir}/receptor_entropy.png', dpi=300)
-    exit(0)
+    if viz_receptors :
+        imshow_volumes(receptor_volumes, mask_rsl_file, mebrains_rsl, args.output_dir )
+    
+    ########################
+    ### Entropy Analysis ###
+    ########################
+    if run_entropy :
+        entropy_file, mean_file, std_file, = entropy_analysis(mask_rsl_file, medial_wall_mask, receptor_volumes, args.wm_surf_filename, args.gm_surf_filename, subsets, entropy_dir, nlayers=nlayers, clobber=clobber)
+        volume_feature_dict['entropy']=[entropy_file]
+        volume_feature_dict['mean'] = [mean_file]
+        volume_feature_dict['std'] = [std_file]
 
-    #inh_entropy_file, _, inh_std_file = entropy_analaysis(mask_rsl_file, inh_list, entropy_dir, descriptor='inh')
-    #exh_entropy_file, _,  exh_std_file = entropy_analaysis(mask_rsl_file, exh_list, entropy_dir, descriptor='exh')
-    #mod_entropy_file, _, mod_std_file = entropy_analaysis(mask_rsl_file, mod_list, entropy_dir, descriptor='mod')
-    #entropy_files = [entropy_file] #, inh_entropy_file, exh_entropy_file, mod_entropy_file]
+    #########################
+    ### Gradient Analysis ###
+    #########################
+    if run_gradient :
+        surf_pca(receptor_surfaces, medial_wall_mask, args.wm_surf_filename, args.sphere_surf_filename, grad_dir, n=5000, clobber=clobber)
+        #args.n=15000 
+        #gradient_volumes = volumetric_gradient_analysis(mask_rsl_file, receptor_volumes, grad_dir, approach='pca', n=args.n, clobber=clobber)
+        #volume_feature_dict['gradient'] = [ gradient_volumes ]
 
-    #volume_feature_dict = {
-    #    'receptor':receptor_volumes, 'gradient':gradient_volumes, 'ratio':ratio_volumes, 'mean':[mean_file], 'entropy':entropy_files, 'std':[std_file]
-    #    }
+    #################################################
+    ### Calculate ratios between receptor volumes ###
+    #################################################
+    if run_ratio :
+        ratio_dict, [inh_list, exh_list, mod_list] = ratio_analysis(receptor_volumes, mask_rsl_file, ratio_dir, clobber=clobber )
+        #ratio_volumes = [fn for fn,lab in ratio_dict.items() if lab in ['Ex', 'Inh', 'Mod', 'GABAa/GABAb',  'Ex/Inh', '(Inh+Ex)/Mod']]
+        ratio_volumes = [fn for fn,lab in ratio_dict.items() if lab in [  'Ex/Inh', '(Inh+Ex)/Mod']]
+        volume_feature_dict['ratio'] = ratio_volumes 
 
-    yerkes_atlas_filename = args.yerkes_atlas_filename
-    plot_receptor_surf([yerkes_atlas_filename], args.yerkes_mid_surf_filename, args.output_dir, label=f'atlas',  cmap='nipy_spectral', threshold=[0,100])
+    ##################################
+    ### Calculate surface aligment ###
+    ##################################
 
-    volume_feature_dict = {
-            'gradient':gradient_volumes,
-            'entropy':[entropy_file],
-            'ratio': ratio_volumes, 
-            'std':[std_file],
-            'mean':[mean_file],
-        }
-    yerkes_surface_feature_dict = preprocess_surface(
+    yerkes_surface_feature_dict, spheres_dict = preprocess_surface(
         args.yerkes_wm_surf_filename,
         args.yerkes_mid_surf_filename,
         args.yerkes_gm_surf_filename, 
@@ -481,6 +465,20 @@ if __name__ == '__main__' :
         align_dir,
         clobber=clobber
         )
+
+    ##########################
+    ### Cell Type Analysis ###
+    ##########################
+    if run_cell_analysis :
+        cell_type_analysis(
+                receptor_surfaces,
+                spheres_dict['warped'], 
+                spheres_dict['fixed'], 
+                args.output_dir+'/cell_type', 
+                clobber=clobber 
+                )
+
+
     #yerkes_atlas_filename = resample_label(
     #    args.yerkes_atlas_filename,
     #    args.yerkes_10k_sphere_surf_filename,
@@ -493,8 +491,12 @@ if __name__ == '__main__' :
     #receptor_volumes = align(args.yerkes_template_filename, args.mebrains_filename, mask_rsl_file, receptor_volumes, align_dir)
     #receptor_surfaces = project_to_surface( receptor_volumes, args.wm_surf_filename, args.gm_surf_filename, profiles_dir, agg_func=np.mean, clobber=False )
     
-    for descriptor, yerkes_feature_surfaces in yerkes_surface_feature_dict.items():
-        apply_surface_atlas(yerkes_feature_surfaces, yerkes_atlas_filename, args.output_dir, descriptor)
+    ############################
+    ### Extract atlas values ###
+    ############################
+    if run_atlas_analysis :
+        for descriptor, yerkes_feature_surfaces in yerkes_surface_feature_dict.items():
+            apply_surface_atlas(yerkes_feature_surfaces, yerkes_atlas_filename, args.output_dir, descriptor)
 
     exit(0)
     
