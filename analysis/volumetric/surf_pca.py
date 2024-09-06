@@ -10,6 +10,9 @@ from brainbuilder.utils.mesh_utils import load_mesh_ext
 from scipy.spatial.distance import pdist, squareform
 from joblib import Parallel, delayed
 
+
+
+
 def distance_covariance(X, Y):
     n = X.shape[0]
     a = squareform(pdist(X, 'euclidean'))
@@ -19,6 +22,11 @@ def distance_covariance(X, Y):
     return np.sqrt((A * B).sum() / (n ** 2))
 
 def distance_correlation(X, Y):
+    if X.ndim == 1:
+        X = X[:, np.newaxis]
+    if Y.ndim == 1:
+        Y = Y[:, np.newaxis]
+
     dCovXY = distance_covariance(X, Y)
     dCovXX = distance_covariance(X, X)
     dCovYY = distance_covariance(Y, Y)
@@ -67,7 +75,7 @@ def calc_diff(features, n=10000):
     return diff
 
 
-def save_partial_vector(vector, medial_wall_mask, idx, surface_filename, sphere_filename, output_dir, label, cmap='RdBu_r', clobber=False):
+def save_partial_vector(vector, cortex_mask, idx, surface_filename, sphere_filename, output_dir, label, cmap='RdBu_r', clobber=False):
     full_comp = interpolate_gradient_over_surface(
         vector,
         surface_filename,
@@ -77,7 +85,7 @@ def save_partial_vector(vector, medial_wall_mask, idx, surface_filename, sphere_
         idx,
         clobber=clobber
     )
-    full_comp[medial_wall_mask] = np.nan
+    full_comp[~cortex_mask] = np.nan
     comp_filename = f'{output_dir}/surf_{label}.gii'
     write_gifti(full_comp, comp_filename)    
 
@@ -87,7 +95,7 @@ def save_partial_vector(vector, medial_wall_mask, idx, surface_filename, sphere_
     return comp_filename
 
 def surf_pca(
-        features_files, medial_wall_mask, surface_filename, sphere_filename, output_dir, n=10000, clobber=False
+        features_files, cortex_mask, surface_filename, sphere_filename, output_dir, n=10000, clobber=False
         ):
     os.makedirs(output_dir, exist_ok=True)
     # Load features into numpy array from list of gifti files
@@ -95,15 +103,17 @@ def surf_pca(
     corr_filename = f'{output_dir}/corr.npy'
     idx_filename = f'{output_dir}/idx.npy'
     features_filename = f'{output_dir}/features.npy'
-
     if not os.path.exists(features_npy_filename) or clobber:
         features = np.array([ np.array(nib.load(file).darrays[0].data) for file in features_files ])
         np.save(features_npy_filename, features)
     else :
         features = np.load(features_npy_filename)
     
-    x,y,z = features.shape
     features = np.swapaxes(features, 0, 1)
+
+    # z-score features by column
+    features = (features - features.mean(axis=0)) / features.std(axis=0)
+    print('Features:', features.shape)
 
     print('Pairwise Distance Correlation')
     if not os.path.exists(corr_filename) or\
@@ -111,10 +121,43 @@ def surf_pca(
         not os.path.exists(features_filename) or\
         clobber :
 
-        valid_idx = np.where(~medial_wall_mask)[0]
+        n_feature_dims = len(features.shape)
+
+        if n_feature_dims == 3:
+            axis=(1,2)
+        elif n_feature_dims == 2:
+            axis=(1,)
+        else:
+            raise ValueError('Features shape not understood, should be 2 or 3')
+
+        # select n random features within mask and dont' have nan values
+        print(np.sum(features,axis=axis))
+        idx1 = ~ np.isnan(np.sum(features,axis=axis))
+        idx2 = np.sum(features,axis=axis) > 0
+        print(idx1.shape, idx2.shape)
+        print(np.sum(idx1), np.sum(idx2))
+        valid_idx = np.where(cortex_mask &  idx1 & idx2 )[0]
+        print(valid_idx)
+        assert len(valid_idx) > 0, 'Not enough valid features'
         idx = np.random.choice(valid_idx, n, replace=False)
-        features = features[idx,:,:]
-        corr = pairwise_distance_correlation(features)
+        features = features[idx,:]
+
+        assert np.sum(np.isnan(features)) == 0 , 'Nan values in features'
+
+        if len(features.shape) == 3:
+            corr = pairwise_distance_correlation(features)
+        elif len(features.shape) == 2:
+            corr = np.corrcoef(features)
+        else :
+            raise ValueError('Features shape not understood')
+
+        corr = np.corrcoef(features.T)
+        v0, v1 = np.percentile(corr, [5, 95])
+        
+        plt.figure(figsize=(7, 7))
+        plt.imshow(corr, vmin=v0, vmax=v1, cmap='RdBu_r')
+        plt.colorbar()
+        plt.savefig(f'{output_dir}/corr.png')   
 
         np.save(corr_filename, corr)
         np.save(idx_filename, idx)
@@ -123,6 +166,8 @@ def surf_pca(
         corr = np.load(corr_filename)
         idx = np.load(idx_filename)
         features = np.load(features_filename)
+
+    assert np.sum(np.isnan(corr)) == 0 , 'Nan values in correlation matrix'
 
     # Calculate PCA
     print('PCA')
@@ -148,7 +193,7 @@ def surf_pca(
     component_list = []
     for i in range(pca_components.shape[1]):
         comp_filename = save_partial_vector(
-                pca_components[:,i], medial_wall_mask, idx, surface_filename, sphere_filename, output_dir, f'PC{i+1}', clobber=clobber
+                pca_components[:,i], cortex_mask, idx, surface_filename, sphere_filename, output_dir, f'PC{i+1}', clobber=clobber
                 )
         component_list.append(comp_filename)
 
@@ -157,7 +202,7 @@ def surf_pca(
     #    labels = cluster.KMeans(eps).fit(features).labels_
     #    
     #    save_partial_vector(
-    #            labels, medial_wall_mask, idx, surface_filename, sphere_filename, output_dir, f'seg_eps-{eps}', cmap='nipy_spectral', clobber=True
+    #            labels, cortex_mask, idx, surface_filename, sphere_filename, output_dir, f'seg_eps-{eps}', cmap='nipy_spectral', clobber=True
     #            )
 
     return component_list

@@ -212,9 +212,9 @@ def entropy_analysis(
             total_entropy = -np.sum(prob * np.log2(prob)) / np.log2(prob.shape[1])
             np.save(total_entropy_filename, total_entropy)
         else :
-            total_entropy = np.load(total_entropy_filename)[0]
+            total_entropy = np.load(total_entropy_filename)
      
-    return entropy_surf_filenames, total_entropy_filenames
+    return entropy_surf_filenames, total_entropy_filename
 
 
 
