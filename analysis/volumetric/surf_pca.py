@@ -144,14 +144,18 @@ def surf_pca(
 
         assert np.sum(np.isnan(features)) == 0 , 'Nan values in features'
 
-        if len(features.shape) == 3:
-            corr = pairwise_distance_correlation(features)
-        elif len(features.shape) == 2:
-            corr = np.corrcoef(features)
+        if not os.path.exists(corr_filename) or clobber:
+            if len(features.shape) == 3:
+                corr = pairwise_distance_correlation(features)
+            elif len(features.shape) == 2:
+                corr = np.corrcoef(features)
+            else :
+                raise ValueError('Features shape not understood')
+            np.save(corr_filename, corr)
         else :
-            raise ValueError('Features shape not understood')
+            corr = np.load(corr_filename)
 
-        corr = np.corrcoef(features.T)
+        #corr = np.corrcoef(features.T)
         v0, v1 = np.percentile(corr, [5, 95])
         
         plt.figure(figsize=(7, 7))
@@ -159,7 +163,6 @@ def surf_pca(
         plt.colorbar()
         plt.savefig(f'{output_dir}/corr.png')   
 
-        np.save(corr_filename, corr)
         np.save(idx_filename, idx)
         np.save(features_filename, features)
     else:   
@@ -197,13 +200,7 @@ def surf_pca(
                 )
         component_list.append(comp_filename)
 
-    #features = features.reshape(features.shape[0],-1)
-    #for eps in np.arange(2,20,2) :
-    #    labels = cluster.KMeans(eps).fit(features).labels_
-    #    
-    #    save_partial_vector(
-    #            labels, cortex_mask, idx, surface_filename, sphere_filename, output_dir, f'seg_eps-{eps}', cmap='nipy_spectral', clobber=True
-    #            )
+
 
     return component_list
 

@@ -414,16 +414,19 @@ def project_to_surface(
         bound1 = n
 
     for receptor_volume in receptor_volumes:
+        print(receptor_volume); 
         profile_fn = f"{output_dir}/{os.path.basename(receptor_volume).replace('.nii.gz','')}.func.gii"
         profile_list.append(profile_fn)
 
         if not os.path.exists(profile_fn) or clobber :
             receptor_img = nib.load(receptor_volume)
+            print(receptor_volume)
             receptor = receptor_img.get_fdata()
+
             starts = np.array(receptor_img.affine[:3,3])
             steps = np.array(receptor_img.affine[[0,1,2],[0,1,2]])
             
-            nvol_out =np.zeros(receptor.shape)
+            nvol_out = np.zeros(receptor.shape)
 
             wm_coords, _ = mesh_utils.load_mesh_ext(wm_surf_filename, correct_offset=True)
             gm_coords, _ = mesh_utils.load_mesh_ext(gm_surf_filename, correct_offset=True)

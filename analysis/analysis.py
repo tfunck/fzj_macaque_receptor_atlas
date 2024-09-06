@@ -346,7 +346,9 @@ def apply_surface_atlas(surf_files, atlas_file, output_dir, descriptor, use_col=
     plt.savefig(f'{output_dir}/atlas_{descriptor}.png')
     plt.clf(); plt.cla()
 
-wrk_dir='/home/thomas-funck/projects/fzj_macaque_receptor_atlas'
+# get repository root dir
+wrk_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 if __name__ == '__main__' :
     parser = argparse.ArgumentParser(description='Volumetric Gradient Analysis')
     parser.add_argument('-m', dest='mask_file', default='data/volumes/MEBRAINS_segmentation_NEW_gm_left.nii.gz', type=str, help='Path to mask file')
@@ -411,7 +413,6 @@ if __name__ == '__main__' :
 
     nlayers=10
 
-    clobber=True
     receptor_surfaces = project_to_surface( 
         receptor_volumes, args.wm_surf_filename, args.gm_surf_filename, profiles_dir, n=nlayers, clobber=clobber
         )
@@ -438,14 +439,13 @@ if __name__ == '__main__' :
     if run_entropy :
         subsets=((0,3), (3,7), (7,10))
         entropy_file, total_entropy_filenames = entropy_analysis(mask_rsl_file, medial_wall_mask, receptor_volumes, args.wm_surf_filename, args.gm_surf_filename, subsets, entropy_dir, nlayers=nlayers, clobber=clobber)
-        volume_feature_dict['entropy']=[entropy_file]
+        #volume_feature_dict['entropy']=entropy_file
         #volume_feature_dict['mean'] = [mean_file]
         #volume_feature_dict['std'] = [std_file]
 
     #########################
     ### Gradient Analysis ###
     #########################
-    clobber=True
     if run_gradient :
         surf_pca(receptor_surfaces, medial_wall_mask, args.wm_surf_filename, args.sphere_surf_filename, grad_dir, n=10000, clobber=clobber)
         #gradient_volumes = volumetric_gradient_analysis(mask_rsl_file, receptor_volumes, grad_dir, approach='pca', n=args.n, clobber=clobber)
