@@ -1,17 +1,8 @@
 """Surface based analysis for 3D receptors"""
 
-import argparse
 import os
-import nibabel as nib
-import numpy as np
 import ants
-import glob
-import brainbuilder.utils.mesh_utils as mesh_utils 
-from brainbuilder.utils.mesh_utils import mesh_to_volume
-from scipy.ndimage import gaussian_filter
-from scipy.stats import spearmanr
-from matplotlib_surface_plotting import plot_surf
-from surfaces.surface_gradient_analysis import roi_gradients, vertex_gradients
+
 from surfaces.surface_diff import surface_diff
 import utils
 

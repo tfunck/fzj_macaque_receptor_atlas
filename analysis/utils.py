@@ -5,9 +5,30 @@ import nibabel as nib
 from kneed import KneeLocator
 
 global ligand_receptor_dict
-ligand_receptor_dict={'ampa':'AMPA', 'kain':'Kainate', 'mk80':'NMDA', 'ly34':'mGluR2/3', 'flum':'GABA$_A$ Benz.', 'cgp5':'GABA$_B$', 'musc':'GABA$_A$ Agonist', 'sr95':'GABA$_A$ Antagonist', 'pire':r'Muscarinic M$_1$', 'afdx':r'Muscarinic M$_2$ (antagonist)','damp':r'Muscarinic M$_3$','epib':r'Nicotinic $\alpha_4\beta_2$','oxot':r'Muscarinic M$_2$ (oxot)', 'praz':r'$\alpha_1$','uk14':r'$\alpha_2$ (agonist)','rx82':r'$\alpha_2$ (antagonist)', 'dpat':r'5-HT$_{1A}$','keta':r'5HT$_2$', 'sch2':r"D$_1$", 'dpmg':'Adenosine 1', 'cellbody':'Cell Body', 'myelin':'Myelin'}
+ligand_receptor_dict={  'ampa':'AMPA', 
+                        'kain':'Kainate', 
+                        'mk80':'NMDA', 
+                        'ly34':'mGluR2/3', 
+                        'flum':'GABA$_A$ Benz.', 
+                        'cgp5':'GABA$_B$', 
+                        'musc':'GABA$_A$ Agonist',
+                        'sr95':'GABA$_A$ Antagonist', 
+                        'pire':r'Muscarinic M$_1$', 
+                        'afdx':r'Muscarinic M$_2$ (antagonist)','damp':r'Muscarinic M$_3$',
+                        'epib':r'Nicotinic $\alpha_4\beta_2$',
+                        'oxot':r'Muscarinic M$_2$ (oxot)', 
+                        'praz':r'$\alpha_1$',
+                        'uk14':r'$\alpha_2$ (agonist)',
+                        'rx82':r'$\alpha_2$ (antagonist)', 
+                        'dpat':r'5-HT$_{1A}$',
+                        'keta':r'5HT$_2$', 
+                        'sch2':r"D$_1$", 'dpmg':'Adenosine 1', 'cellbody':'Cell Body', 'myelin':'Myelin'}
 
-
+def get_category(f):
+    fsplit = os.path.basename(f).split('_') 
+    desc_idx = [i for i, x in enumerate(fsplit) if 'desc' in x][0]
+    category = '_'.join(fsplit[3:desc_idx-1])
+    return category
 
 def plot_explained_variance(gm, output_dir, threshold=0.95):
     lambdas = gm.lambdas_
@@ -44,12 +65,13 @@ def get_volume_from_list(input_list, target_string, zscore=True):
 
     assert len(files) == 1, f'Expected 1 file, got {len(files)}'
 
-    vol = nib.load(files[0]).get_fdata()
+    #vol = nib.load(files[0]).get_fdata()
+    data = nib.load(files[0]).darrays[0].data
 
     if zscore:
-        vol = (vol - vol.mean()) / vol.std()
+        data = (data - data.mean()) / data.std()
 
-    return vol
+    return data
 
 
 def get_voxel_receptor_values(receptor_volumes, vxl, output_dir):
