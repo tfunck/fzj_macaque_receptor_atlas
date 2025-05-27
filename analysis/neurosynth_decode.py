@@ -47,7 +47,7 @@ from brainsmash.mapgen.base import Base
 
 def brain_smash(x:np.array, y:np.array, dist_mat_fin:str, output_dir='outputs/', clobber:bool=False):
     # instantiate class and generate 1000 surrogates
-    print('\t txt2memmap')
+    print('\ttxt2memmap')
     dist_map_npy = f'outputs/distmat.npy'
     if not os.path.exists(dist_map_npy) or clobber :
         dist_map = txt2memmap(dist_mat_fin, output_dir, maskfile=None, delimiter=' ')['distmat']

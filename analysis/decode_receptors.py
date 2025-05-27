@@ -5,7 +5,7 @@ import pandas as pd
 import nibabel as nib
 import numpy as np
 
-from neurosynth_decode import neurosynth_decode, neurosynth_cca, get_surface_features
+from neurosynth_decode import neurosynth_decode, get_surface_features
 from utils import ligand_receptor_dict
 
 mebrains_to_hcp = "/media/windows/projects/fzj_macaque_receptor_atlas/outputs/0.25mm/surfaces/mebrains2human_surf_tfm.surf.gii"
